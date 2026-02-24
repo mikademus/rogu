@@ -2,6 +2,21 @@
 
 *Rogu* is the short form for **The Kiroku Logger** — *kiroku* (記録) is "record" in Japanese. A lightweight, self-contained, single-header C++ logger with no unnecessary dependencies and no integration overhead.
 
+## Why Rogu Exists
+Logging should be the simplest thing in a project. It rarely is.
+
+When basic `std::cout` and `std::cerr` output stopped being sufficient — which happens reliably the moment a prototype becomes a project — the natural next step was to reach for an established logging library. The options are not lacking — log4cpp, log4cxx, Boost.Log, spdlog, glog (Google Logging), Poco Logger, g3log, reckless, Pantheios, and others. After working with several of these, a pattern emerged: they are all, without exception, far too much.
+
+* **Too much to integrate** — most require a build step, a CMake module, a package manager entry, or all three.
+* **Too much to configure** — Boost.Log in particular treats a basic setup as an exercise in template metaprogramming.
+* **Too much to learn** — log4cpp and its descendants carry the weight of their Java origins, demanding appenders, layouts, and hierarchies before a single line is written.
+* **Too much overhead** — some are opinionated about threading models, memory allocation, or output formats in ways that conflict with the surrounding codebase.
+* And **too much code** — libraries that run to tens of thousands of lines to solve a problem that should need hundreds.
+
+None of them offered what seemed like a reasonable baseline: a single header you include, a stream you register, and a set of log calls you make. No boilerplate, no build integration, no opinions about your project structure.
+
+So The Kiroku Logger (Rogu) was written instead. Its goals are straightforward: a single #include, modern C++ syntax, minimal resource footprint, and solid coverage of the cases that actually come up — multiple output streams, per-stream log level control, and structured output formatting on the roadmap.
+
 ## Overview
 Most logging frameworks are integration projects. Rogu is not. It is a single header file you drop into your project and include. There is nothing to build, no dependencies to satisfy, no configuration files to write.
 
