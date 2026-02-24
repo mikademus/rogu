@@ -130,7 +130,11 @@ Available colours correspond to the EGA console palette: black, red, green, yell
 
 ### Roadmap
 * Timestamps with configurable format
-* Per-stream output formatters (enabling structured output such as JSON)
+* Source location
+* Per-stream output formatters, enabling
+  * structured output such as JSON
+  * stream formatting (this includes reordering segments and changing prefixes etc)
+* Compile-time level stripping — a #define ROGU_MIN_LEVEL that eliminates log calls below a threshold entirely at compile time, producing zero overhead in release builds.
 
 ### Licence
 Licenced as-is under the MIT licence.
