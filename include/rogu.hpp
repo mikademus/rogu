@@ -39,10 +39,11 @@
 #define KIROKU_INCLUDE
 
 // Uncomment to enable feature:
-#define ROGU_ANSI       /* Enable ANSI colour output */
-#define ROGU_ASYNC      /* Enable asynchronous logging */
+#define ROGU_ANSI            /* Enable ANSI colour output */
+#define ROGU_ASYNC           /* Enable asynchronous logging */
 #define ROGU_LOGLEVEL_PER_STREAM
 #define ROGU_SOURCE_LOCATION /* Enable trace source log location */
+#define ROGU_TIMESTAMP       /* Enable time/datestamps */
 
 #include <atomic>
 #include <format>
@@ -61,6 +62,10 @@
 #ifdef ROGU_SOURCE_LOCATION
 #include <concepts>
 #include <source_location>
+#endif
+
+#ifdef ROGU_TIMESTAMP
+#include <chrono>
 #endif
 
 #define LOG_REC rogu::record
@@ -268,6 +273,17 @@ namespace rogu
         };
 #endif
 
+#ifdef ROGU_TIMESTAMP
+        inline std::string timestamp()
+        {
+            auto now = std::chrono::system_clock::now();
+            auto secs = std::chrono::floor<std::chrono::seconds>(now);
+            return std::format("{:%H:%M:%S} ", secs);
+        }
+#else
+        inline std::string_view timestamp() { return ""; }
+#endif
+
         struct stream_wrapper
         {
             std::vector<std::ostream*> streams;
@@ -361,7 +377,7 @@ namespace rogu
             static constexpr col colour = Colour;
         };
 
-        template <typename Traits, typename... Args>
+template <typename Traits, typename... Args>
         stream_wrapper log(std::string_view prefix, format_with_location fwl = {""}, Args&&... args)
         {
             std::lock_guard<std::mutex> lock(output_mutex);
@@ -417,10 +433,17 @@ namespace rogu
             {
                 std::string formatted;
                 if constexpr (sizeof...(args) == 0)
-                    formatted = std::format("{}{}{}", rogu::colorise(Traits::colour, prefix), loc_str, msg);
+                    formatted = std::format("{}{}{}{}",
+                        timestamp(),
+                        rogu::colorise(Traits::colour, prefix),
+                        loc_str,
+                        msg);
                 else
-                    formatted = std::format("{}{}{}", rogu::colorise(Traits::colour, prefix), loc_str,
-                                            std::vformat(msg, std::make_format_args(args...)));
+                    formatted = std::format("{}{}{}{}",
+                        timestamp(),
+                        rogu::colorise(Traits::colour, prefix),
+                        loc_str,
+                        std::vformat(msg, std::make_format_args(args...)));
 
                 std::lock_guard<std::mutex> async_lock(async_logger.queue_mutex);
                 async_logger.queue.push({std::move(formatted), active_streams, pop_nobreak == 1});
@@ -431,10 +454,17 @@ namespace rogu
 
             std::string formatted;
             if constexpr (sizeof...(args) == 0)
-                formatted = std::format("{}{}{}", rogu::colorise(Traits::colour, prefix), loc_str, msg);
+                formatted = std::format("{}{}{}{}",
+                    timestamp(),
+                    rogu::colorise(Traits::colour, prefix),
+                    loc_str,
+                    msg);
             else
-                formatted = std::format("{}{}{}", rogu::colorise(Traits::colour, prefix), loc_str,
-                                        std::vformat(msg, std::make_format_args(args...)));
+                formatted = std::format("{}{}{}{}",
+                    timestamp(),
+                    rogu::colorise(Traits::colour, prefix),
+                    loc_str,
+                    std::vformat(msg, std::make_format_args(args...)));
 
             for (auto* stream : active_streams)
                 *stream << formatted;
