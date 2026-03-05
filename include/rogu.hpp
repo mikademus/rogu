@@ -43,6 +43,7 @@
 #define LOGGER_ASYNC      /* Enable asynchronous logging */
 #define LOGGER_LOGLEVEL_PER_STREAM
 
+#include <atomic>
 #include <format>
 #include <mutex>
 #include <ostream>
@@ -125,8 +126,8 @@ namespace rogu
             white      = 47,     bright_white      = 107,
         };
     
-        static const char* colour_escape_code = "\033[";
-        static const char* reset_colours_code = "\033[0m";
+        inline constexpr const char* colour_escape_code = "\033[";
+        inline constexpr const char* reset_colours_code = "\033[0m";
     
         inline std::string colour_code(fg col_fg)
         {   
@@ -178,7 +179,7 @@ namespace rogu
 
         inline std::vector<std::ostream*>& get_outputs() { return logger_state::outputs(); }
 
-        static std::mutex output_mutex;
+        inline std::mutex output_mutex;
 
 #ifdef LOGGER_LOGLEVEL_PER_STREAM    
         inline bool ll_enabled(uint8_t state, log_level ll)
@@ -198,13 +199,13 @@ namespace rogu
             bool no_line_break;
         };
 
-        static struct async_state
+        struct async_state
         {
             std::queue<async_log_message> queue;
             std::mutex queue_mutex;
             std::condition_variable queue_cv;
             std::thread worker;
-            bool running = false;
+            std::atomic<bool> running = false;
 
             void process()
             {
@@ -229,57 +230,54 @@ namespace rogu
                     }
                 }
             }
-        } async_logger;
+        };
+        inline async_state async_logger;
 #endif
 
         struct stream_wrapper
         {
-            std::vector<std::ostream*>* streams{nullptr};
+            std::vector<std::ostream*> streams;
             bool no_line_break{true};
 
-            stream_wrapper(std::vector<std::ostream*>* s, bool nlb) : streams(s), no_line_break(nlb) {}
+            stream_wrapper() : no_line_break(true) {}
+            stream_wrapper(std::vector<std::ostream*> s, bool nlb) : streams(std::move(s)), no_line_break(nlb) {}
 
-            ~stream_wrapper() 
-            { 
-                if (streams) 
-                    for (auto* stream : *streams)
+            ~stream_wrapper()
+            {
+                for (auto* stream : streams)
 #ifdef LOGGER_ANSI
-                        *stream << ansi::reset_colours_code << (no_line_break ? "" : "\n");
+                    *stream << ansi::reset_colours_code << (no_line_break ? "" : "\n");
 #else
-                        *stream << (no_line_break ? "" : "\n");
+                    *stream << (no_line_break ? "" : "\n");
 #endif
             }
 
-            stream_wrapper& operator<<(char c) 
+            stream_wrapper& operator<<(char c)
             {
-                if (streams)
-                    for (auto* stream : *streams)
-                        *stream << c;
+                for (auto* stream : streams)
+                    *stream << c;
                 return *this;
             }
 
-            stream_wrapper& operator<<(const char* s) 
+            stream_wrapper& operator<<(const char* s)
             {
-                if (streams)
-                    for (auto* stream : *streams)
-                        *stream << s;
+                for (auto* stream : streams)
+                    *stream << s;
                 return *this;
             }
 
-            stream_wrapper& operator<<(std::ostream& (*pf)(std::ostream&)) 
+            stream_wrapper& operator<<(std::ostream& (*pf)(std::ostream&))
             {
-                if (streams)
-                    for (auto* stream : *streams)
-                        pf(*stream);
+                for (auto* stream : streams)
+                    pf(*stream);
                 return *this;
             }
 
             template<typename T>
-            stream_wrapper& operator<<(const T& value) 
+            stream_wrapper& operator<<(const T& value)
             {
-                if (streams)
-                    for (auto* stream : *streams)
-                        *stream << value;
+                for (auto* stream : streams)
+                    *stream << value;
                 return *this;
             }
         };
@@ -301,6 +299,8 @@ namespace rogu
             return s.ends_with('$') ? 1 : 0;            
         }
 
+/* 
+// DEAD CODE?        
         template <typename... Args>
         void log_message(col colour, std::string_view prefix, std::string_view s, Args&&... args)
         {
@@ -311,6 +311,7 @@ namespace rogu
             for (auto* stream : get_outputs())
                 *stream << message;
         }
+*/
 
         struct null_buffer : std::streambuf 
         {
@@ -324,10 +325,11 @@ namespace rogu
             null_buffer nb;
         };
 
-        static null_stream cnull;        
+        inline null_stream cnull;        
 
-        static void initialise_outputs() 
+        inline void initialise_outputs_locked() 
         {
+            // Note: Make certain a mutex is held before calling.
             if (get_outputs().empty())
                 get_outputs().push_back(&cnull);
         }
@@ -342,9 +344,10 @@ namespace rogu
         template <typename Traits, typename... Args>
         stream_wrapper log(std::string_view prefix, std::string_view s = "", Args&&... args)
         {
-            initialise_outputs();
+            std::lock_guard<std::mutex> lock(output_mutex);
+            initialise_outputs_locked();
             if (Traits::level != log_level::record && logger_state::master_levels()[(int) Traits::level] == ll_state::off)
-                return stream_wrapper(nullptr, false);
+                return stream_wrapper{};
 
             static thread_local std::vector<std::ostream*> active_streams;
             active_streams.clear();
@@ -378,7 +381,7 @@ namespace rogu
                     active_streams.push_back(stream);
             }
             if (active_streams.empty())
-                return stream_wrapper(nullptr, false);
+                return stream_wrapper{};
 
 #ifdef LOGGER_ASYNC
             if (async_logger.running)
@@ -394,9 +397,9 @@ namespace rogu
                                                          std::make_format_args(args...)));
                 
                 std::lock_guard<std::mutex> lock(async_logger.queue_mutex);
-                async_logger.queue.push({std::move(formatted), std::move(active_streams), pop_nobreak == 1});
+                async_logger.queue.push({std::move(formatted), active_streams, pop_nobreak == 1});
                 async_logger.queue_cv.notify_one();
-                return stream_wrapper(&async_logger.queue.back().streams, pop_nobreak == 1);
+                return stream_wrapper{};
             }
 #endif
 
@@ -412,7 +415,7 @@ namespace rogu
                                                      std::make_format_args(args...)));
             for (auto* stream : active_streams)
                 *stream << formatted;
-            return stream_wrapper(&active_streams, pop_nobreak == 1);
+            return stream_wrapper{std::move(active_streams), pop_nobreak == 1};
         }
     }
 
@@ -434,7 +437,7 @@ namespace rogu
     inline auto record   = [](std::string_view s = "", auto&&... args) { return impl::log<impl::log_traits<log_level::record,   col::grey>>("", s, std::forward<decltype(args)>(args)...); };
 
 #ifdef LOGGER_ASYNC
-    static void start_async()
+    inline void start_async()
     {
         std::lock_guard<std::mutex> lock(impl::async_logger.queue_mutex);
         if (!impl::async_logger.running)
@@ -444,7 +447,7 @@ namespace rogu
         }
     }
 
-    static void stop_async()
+    inline void stop_async()
     {
         std::unique_lock<std::mutex> lock(impl::async_logger.queue_mutex);
         if (impl::async_logger.running)
@@ -453,55 +456,60 @@ namespace rogu
             lock.unlock();
             impl::async_logger.queue_cv.notify_one();
             impl::async_logger.worker.join();
+
+            // Worker has exited; acquire mutex before touching the queue
+            lock.lock();
             while (!impl::async_logger.queue.empty())
             {
                 impl::async_log_message msg = std::move(impl::async_logger.queue.front());
                 impl::async_logger.queue.pop();
+                lock.unlock();
                 for (auto* stream : msg.streams)
 #ifdef LOGGER_ANSI
-                    *stream << msg.text << ansi::reset_colours_code << (msg.no_line_break ? "" : "\n");
+                    *stream << msg.text << rogu::ansi::reset_colours_code << (msg.no_line_break ? "" : "\n");
 #else
                     *stream << msg.text << (msg.no_line_break ? "" : "\n");
 #endif
+                lock.lock();
             }
         }
     }
 #endif
 
-    static void add_output(std::ostream* stream)
+    inline void add_output(std::ostream* stream)
     {
         if (!stream) return;
         std::lock_guard<std::mutex> lock(impl::output_mutex);
-        impl::initialise_outputs();
+        impl::initialise_outputs_locked();
         impl::get_outputs().push_back(stream);
 #ifdef LOGGER_LOGLEVEL_PER_STREAM    
         impl::logger_state::log_levels().emplace_back(stream, 0b1111111);
 #endif
     }
 
-    static void disable_log_level(log_level ll)
+    inline void disable_log_level(log_level ll)
     {
         impl::logger_state::master_levels()[(int) ll] = impl::ll_state::off;
     }
 
-    static void enable_log_level(log_level ll)
+    inline void enable_log_level(log_level ll)
     {
         impl::logger_state::master_levels()[(int) ll] = impl::ll_state::on;
     }
 
 #ifdef LOGGER_LOGLEVEL_PER_STREAM    
-    static void delegate_log_level(log_level ll)
+    inline void delegate_log_level(log_level ll)
     {
         impl::logger_state::master_levels()[(int) ll] = impl::ll_state::per_stream;
     }
 
-    static void disable_log_level_for_stream(std::ostream* s, log_level ll)
+    inline void disable_log_level_for_stream(std::ostream* s, log_level ll)
     {
         for (auto& [stream, bits] : impl::logger_state::log_levels())
             if (stream == s) impl::clear_bits(bits, ll);
     }
 
-    static void enable_log_level_for_stream(std::ostream* s, log_level ll)
+    inline void enable_log_level_for_stream(std::ostream* s, log_level ll)
     {
         for (auto& [stream, bits] : impl::logger_state::log_levels())
             if (stream == s) impl::set_bits(bits, ll);
