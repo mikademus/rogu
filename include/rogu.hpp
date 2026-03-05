@@ -31,17 +31,17 @@
 // COMPILE TIME CONTROLS
 //-------------------------
 // Define these before including rogu.hpp to control:
-//      #define LOGGER_ANSI     // Enable ANSI color support
-//      #define LOGGER_ASYNC    // Enable async logging
-//      #define LOGGER_LOGLEVEL_PER_STREAM    // Enable global and per-stream selection of logging
+//      #define ROGU_ANSI     // Enable ANSI color support
+//      #define ROGU_ASYNC    // Enable async logging
+//      #define ROGU_LOGLEVEL_PER_STREAM    // Enable global and per-stream selection of logging
 
 #ifndef KIROKU_INCLUDE
 #define KIROKU_INCLUDE
 
 // Uncomment to enable feature:
-#define LOGGER_ANSI       /* Enable ANSI colour output */
-#define LOGGER_ASYNC      /* Enable asynchronous logging */
-#define LOGGER_LOGLEVEL_PER_STREAM
+#define ROGU_ANSI       /* Enable ANSI colour output */
+#define ROGU_ASYNC      /* Enable asynchronous logging */
+#define ROGU_LOGLEVEL_PER_STREAM
 
 #include <atomic>
 #include <format>
@@ -50,7 +50,7 @@
 #include <string>
 #include <vector>
 
-#ifdef LOGGER_ASYNC
+#ifdef ROGU_ASYNC
 #include <queue>
 #include <thread>
 #include <condition_variable>
@@ -77,6 +77,11 @@ namespace rogu
         record
     };
 
+    // log_levels() assume that no more than seven distinct levels exist and
+    // represent these as bitmasks in a uint8_t. This guards against breaking this limit:
+    static_assert(static_cast<int>(log_level::record) < 8,
+        "log_level has exceeded 7 values; uint8_t per-stream bitmask is no longer sufficient");
+
     enum col
     {
         black           = 0,
@@ -99,7 +104,7 @@ namespace rogu
 
     inline std::string colorise(col fg, std::string_view str); // forward declaration
 
-#ifdef LOGGER_ANSI
+#ifdef ROGU_ANSI
     namespace ansi
     {
         enum struct fg
@@ -158,7 +163,7 @@ namespace rogu
                 return outputs;
             }
 
-#ifdef LOGGER_LOGLEVEL_PER_STREAM    
+#ifdef ROGU_LOGLEVEL_PER_STREAM    
             static std::vector<std::pair<std::ostream*, uint8_t>>& log_levels()
             {
                 static std::vector<std::pair<std::ostream*, uint8_t>> levels;
@@ -168,7 +173,7 @@ namespace rogu
 
             static ll_state (&master_levels())[7]
             {
-#ifdef LOGGER_LOGLEVEL_PER_STREAM    
+#ifdef ROGU_LOGLEVEL_PER_STREAM    
                 static ll_state levels[7] = {ll_state::per_stream, ll_state::per_stream, ll_state::per_stream, ll_state::per_stream, ll_state::per_stream, ll_state::per_stream, ll_state::on};
 #else
                 static ll_state levels[7] = {ll_state::on, ll_state::on, ll_state::on, ll_state::on, ll_state::on, ll_state::on, ll_state::on};
@@ -181,7 +186,7 @@ namespace rogu
 
         inline std::mutex output_mutex;
 
-#ifdef LOGGER_LOGLEVEL_PER_STREAM    
+#ifdef ROGU_LOGLEVEL_PER_STREAM    
         inline bool ll_enabled(uint8_t state, log_level ll)
         {
             return state & (1 << (int) ll);
@@ -191,7 +196,7 @@ namespace rogu
         inline void clear_bits(uint8_t& bits, log_level mask) { bits &= ~(1 << (int) mask); }
 #endif
 
-#ifdef LOGGER_ASYNC
+#ifdef ROGU_ASYNC
         struct async_log_message
         {
             std::string text;
@@ -220,7 +225,7 @@ namespace rogu
                         lock.unlock();
                         for (auto* stream : msg.streams)
                         {
-#ifdef LOGGER_ANSI
+#ifdef ROGU_ANSI
                             *stream << msg.text << ansi::reset_colours_code << (msg.no_line_break ? "" : "\n");
 #else
                             *stream << msg.text << (msg.no_line_break ? "" : "\n");
@@ -245,7 +250,7 @@ namespace rogu
             ~stream_wrapper()
             {
                 for (auto* stream : streams)
-#ifdef LOGGER_ANSI
+#ifdef ROGU_ANSI
                     *stream << ansi::reset_colours_code << (no_line_break ? "" : "\n");
 #else
                     *stream << (no_line_break ? "" : "\n");
@@ -282,7 +287,7 @@ namespace rogu
             }
         };
 
-#ifdef LOGGER_ANSI
+#ifdef ROGU_ANSI
         inline ansi::fg to_fg(rogu::col c)
         {
             return static_cast<ansi::fg>(static_cast<int>(c) + 30);
@@ -298,20 +303,6 @@ namespace rogu
         {            
             return s.ends_with('$') ? 1 : 0;            
         }
-
-/* 
-// DEAD CODE?        
-        template <typename... Args>
-        void log_message(col colour, std::string_view prefix, std::string_view s, Args&&... args)
-        {
-            int pop_nobreak = trailing_no_break_marker(s);
-            std::string_view formatted_str = s.substr(0, s.size() - pop_nobreak);
-            std::string message = std::format("{}{}", rogu::colorise(colour, prefix), 
-                                              std::vformat(formatted_str, std::make_format_args(args...)));
-            for (auto* stream : get_outputs())
-                *stream << message;
-        }
-*/
 
         struct null_buffer : std::streambuf 
         {
@@ -364,7 +355,7 @@ namespace rogu
                     include = true;
                 else if (master_state == ll_state::per_stream)
                 {
-#ifdef LOGGER_LOGLEVEL_PER_STREAM
+#ifdef ROGU_LOGLEVEL_PER_STREAM
                     for (const auto& [s, bits] : logger_state::log_levels())
                         if (s == stream)
                         {
@@ -383,7 +374,7 @@ namespace rogu
             if (active_streams.empty())
                 return stream_wrapper{};
 
-#ifdef LOGGER_ASYNC
+#ifdef ROGU_ASYNC
             if (async_logger.running)
             {
                 int pop_nobreak = trailing_no_break_marker(s);
@@ -421,7 +412,7 @@ namespace rogu
 
     inline std::string colorise(col fg, std::string_view str)
     {
-#ifdef LOGGER_ANSI
+#ifdef ROGU_ANSI
         return std::format("{}{}{}", ansi::colour_code(impl::to_fg(fg)), str, ansi::reset_colours_code);
 #else
         return std::string(str);
@@ -436,7 +427,7 @@ namespace rogu
     inline auto critical = [](std::string_view s = "", auto&&... args) { return impl::log<impl::log_traits<log_level::critical, col::light_red>>("CRITICAL: ", s, std::forward<decltype(args)>(args)...); };
     inline auto record   = [](std::string_view s = "", auto&&... args) { return impl::log<impl::log_traits<log_level::record,   col::grey>>("", s, std::forward<decltype(args)>(args)...); };
 
-#ifdef LOGGER_ASYNC
+#ifdef ROGU_ASYNC
     inline void start_async()
     {
         std::lock_guard<std::mutex> lock(impl::async_logger.queue_mutex);
@@ -465,7 +456,7 @@ namespace rogu
                 impl::async_logger.queue.pop();
                 lock.unlock();
                 for (auto* stream : msg.streams)
-#ifdef LOGGER_ANSI
+#ifdef ROGU_ANSI
                     *stream << msg.text << rogu::ansi::reset_colours_code << (msg.no_line_break ? "" : "\n");
 #else
                     *stream << msg.text << (msg.no_line_break ? "" : "\n");
@@ -482,7 +473,7 @@ namespace rogu
         std::lock_guard<std::mutex> lock(impl::output_mutex);
         impl::initialise_outputs_locked();
         impl::get_outputs().push_back(stream);
-#ifdef LOGGER_LOGLEVEL_PER_STREAM    
+#ifdef ROGU_LOGLEVEL_PER_STREAM    
         impl::logger_state::log_levels().emplace_back(stream, 0b1111111);
 #endif
     }
@@ -497,7 +488,7 @@ namespace rogu
         impl::logger_state::master_levels()[(int) ll] = impl::ll_state::on;
     }
 
-#ifdef LOGGER_LOGLEVEL_PER_STREAM    
+#ifdef ROGU_LOGLEVEL_PER_STREAM    
     inline void delegate_log_level(log_level ll)
     {
         impl::logger_state::master_levels()[(int) ll] = impl::ll_state::per_stream;
