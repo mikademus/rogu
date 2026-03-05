@@ -394,7 +394,6 @@ namespace rogu
             }
 #endif
 
-            std::lock_guard<std::mutex> lock(output_mutex);
             int pop_nobreak = trailing_no_break_marker(s);
             std::string formatted;
             if constexpr (sizeof...(args) == 0)
