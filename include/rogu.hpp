@@ -1,41 +1,134 @@
-//=========S===================================================================
+//============================================================================
 // rogu: The Kiroku Logger
 // version: 0.6.0
 //============================================================================
 //
-// INVOKATION:
-//----------------
+// INVOCATION
+//------------
 // Function syntax:
-//      rogu::xxx("{} {}", "std::format", "style");
+//      rogu::info("connected to {} on port {}", host, port);
+//
 // Stream syntax:
-//      rogu::xxx() << "std::ostream " << "style";
-// Shorthand macros:
-//      LOG_XXX();  // LOG_DEBUG(), LOG_ERR(), etc.
+//      rogu::warning() << "unexpected value: " << value;
 //
-// LOG LEVELS:
-//----------------
-// rogu::debug(fmt = "", args) << more;
-// rogu::trace(fmt = "", args) << more;
-// rogu::info(fmt = "", args) << more;
-// rogu::warning(fmt = "", args) << more;
-// rogu::error(fmt = "", args) << more;
-// rogu::critical(fmt = "", args) << more;
-// rogu::record(fmt = "", args) << more;      // Always output on all streams, regardless of flags
+// Mixed — format string followed by stream continuation:
+//      rogu::error("failed at step {}", step) << " reason: " << reason;
 //
-// LINE BREAKS
-//-----------------
-// The logger automatically inserts a line feed after each string. 
-// To suppress it, pass the no_break flag:
-//      rogu::info(rogu::no_break, "Loading...");
+// Flags as optional first argument:
+//      rogu::info(rogu::no_break, "loading...");
 //      rogu::info(rogu::msg_only, " done");
 //
-// COMPILE TIME CONTROLS
-//-------------------------
-// Define these before including rogu.hpp to control:
-//      #define ROGU_ANSI     // Enable ANSI color support
-//      #define ROGU_ASYNC    // Enable async logging
-//      #define ROGU_LOGLEVEL_PER_STREAM    // Enable global and per-stream selection of logging
-
+// Shorthand macros expand to the corresponding rogu:: function:
+//      LOG_TRACE()  LOG_DEBUG()  LOG_INFO()
+//      LOG_WARN()   LOG_ERR()    LOG_CRIT()  LOG_REC()
+//
+//
+// LOG LEVELS
+//------------
+// In ascending severity order:
+//
+//      rogu::trace()     Execution flow
+//      rogu::debug()     Development output
+//      rogu::info()      General information
+//      rogu::warning()   Warnings
+//      rogu::error()     Errors
+//      rogu::critical()  Critical errors
+//      rogu::record()    Always outputs to all streams; bypasses all level filters
+//
+//
+// FLAGS
+//-------
+// Flags may be combined with | and passed as the first argument to any log call.
+//
+//      rogu::no_break    Suppress the trailing newline. Use with rogu::msg_only
+//                        on the next call to continue the same line.
+//      rogu::msg_only    Suppress all fields except the message body. Useful for
+//                        continuation lines after rogu::no_break.
+//      rogu::no_time     Suppress the timestamp for this call regardless of
+//                        formatter settings. Requires ROGU_TIMESTAMP.
+//      rogu::force_time  Force the timestamp for this call regardless of
+//                        formatter settings. Overrides rogu::no_time.
+//                        Requires ROGU_TIMESTAMP.
+//
+//
+// OUTPUT STREAMS
+//----------------
+// Rogu discards all output until at least one stream is registered:
+//      rogu::add_output(&std::cout);
+//      rogu::add_output(&logfile, "{ll} {msg}");  // optional format string
+//
+// Multiple streams are written simultaneously. Each stream has its own
+// format string and its own per-stream level settings.
+//
+//
+// FORMAT STRINGS
+//----------------
+// Each stream renders log events using a format string containing tokens.
+// The default format string is: {time}{ll} {msg} ({trace})
+//
+// Tokens:
+//      {time}    UTC timestamp (HH:MM:SS). Requires ROGU_TIMESTAMP.
+//      {ll}      Log level string (debug, info, warning, etc.)
+//      {msg}     Message body. The << stream continuation writes here.
+//      {trace}   Source location (file:line). Requires ROGU_SOURCE_LOCATION.
+//
+// Decoration outside tokens is emitted literally:
+//      "[{ll}] {msg} at {trace}"  →  "[info] connected at main.cpp:42"
+//
+// Escape sequences:
+//      {{  →  literal {
+//      }}  →  literal }
+//
+// Unrecognised tokens are passed through literally: {foo} → {foo}
+//
+// The format string for a registered stream can be changed at any time:
+//      rogu::set_formatter(&std::cout, "{ll} {msg}");
+//
+//
+// LOG LEVEL CONTROL
+//-------------------
+// Global control affects all streams:
+//      rogu::disable_log_level(rogu::log_level::debug);
+//      rogu::enable_log_level(rogu::log_level::debug);
+//
+// Per-stream control requires ROGU_LOGLEVEL_PER_STREAM:
+//      rogu::delegate_log_level(rogu::log_level::debug);   // hand off to per-stream
+//      rogu::enable_log_level_for_stream(&std::cout, rogu::log_level::debug);
+//      rogu::disable_log_level_for_stream(&logfile,  rogu::log_level::debug);
+//
+//
+// ASYNCHRONOUS LOGGING
+//----------------------
+// Requires ROGU_ASYNC. Log calls return immediately; a background thread
+// handles writes. Stream-style chaining (<<) is a no-op in async mode.
+//      rogu::start_async();
+//      // ... application runs ...
+//      rogu::stop_async();   // flushes remaining queue before returning
+//
+//
+// ANSI COLOUR OUTPUT
+//--------------------
+// Requires ROGU_ANSI. Each log level has an assigned colour. Strings can
+// also be colourised directly:
+//      rogu::info("status: {}", rogu::colorise(rogu::col::light_green, "ok"));
+//
+// Available colours (EGA palette):
+//      black  red  green  yellow  blue  magenta  cyan  grey
+//      dark_grey  light_red  light_green  light_yellow  light_blue
+//      light_magenta  light_cyan  white
+//
+//
+// COMPILE-TIME CONTROLS
+//-----------------------
+// Define before including rogu.hpp. The header has all enabled by default —
+// comment out what you do not need:
+//
+//      #define ROGU_ANSI                // Enable ANSI colour output
+//      #define ROGU_ASYNC               // Enable asynchronous logging
+//      #define ROGU_LOGLEVEL_PER_STREAM // Enable per-stream level control
+//      #define ROGU_SOURCE_LOCATION     // Enable {trace} source location token
+//      #define ROGU_TIMESTAMP           // Enable {time} UTC timestamp token
+//
 #ifndef KIROKU_INCLUDE
 #define KIROKU_INCLUDE
 
