@@ -5,32 +5,32 @@
 // INVOKATION:
 //----------------
 // Function syntax:
-//      logger::xxx("{} {}", "std::format", "style");
+//      rogu::xxx("{} {}", "std::format", "style");
 // Stream syntax:
-//      logger::xxx() << "std::ostream " << "style";
+//      rogu::xxx() << "std::ostream " << "style";
 // Shorthand macros:
 //      LOG_XXX();  // LOG_DEBUG(), LOG_ERR(), etc.
 //
 // LOG LEVELS:
 //----------------
-// logger::debug(fmt = "", args) << more;
-// logger::trace(fmt = "", args) << more;
-// logger::info(fmt = "", args) << more;
-// logger::warning(fmt = "", args) << more;
-// logger::error(fmt = "", args) << more;
-// logger::critical(fmt = "", args) << more;
-// logger::record(fmt = "", args) << more;      // Always output on all streams, regardless of flags
+// rogu::debug(fmt = "", args) << more;
+// rogu::trace(fmt = "", args) << more;
+// rogu::info(fmt = "", args) << more;
+// rogu::warning(fmt = "", args) << more;
+// rogu::error(fmt = "", args) << more;
+// rogu::critical(fmt = "", args) << more;
+// rogu::record(fmt = "", args) << more;      // Always output on all streams, regardless of flags
 //
 // LINE BREAKS
 //-----------------
 // The logger automatically inserts a line feed after each string. 
 // Adding '$' at end of string (inspired by regex EOL marker) 
 // prevents automatic line break.
-//      logger::info("This line will not break$");
+//      rogu::info("This line will not break$");
 //
 // COMPILE TIME CONTROLS
 //-------------------------
-// Define these before including log.h to control:
+// Define these before including rogu.hpp to control:
 //      #define LOGGER_ANSI     // Enable ANSI color support
 //      #define LOGGER_ASYNC    // Enable async logging
 //      #define LOGGER_LOGLEVEL_PER_STREAM    // Enable global and per-stream selection of logging
@@ -55,13 +55,13 @@
 #include <condition_variable>
 #endif
 
-#define LOG_REC logger::record
-#define LOG_CRIT logger::critical
-#define LOG_ERR logger::error
-#define LOG_WARN logger::warning
-#define LOG_INFO logger::info
-#define LOG_DEBUG logger::debug
-#define LOG_TRACE logger::trace
+#define LOG_REC rogu::record
+#define LOG_CRIT rogu::critical
+#define LOG_ERR rogu::error
+#define LOG_WARN rogu::warning
+#define LOG_INFO rogu::info
+#define LOG_DEBUG rogu::debug
+#define LOG_TRACE rogu::trace
 
 namespace rogu
 {
@@ -285,12 +285,12 @@ namespace rogu
         };
 
 #ifdef LOGGER_ANSI
-        inline ansi::fg to_fg(logger::col c)
+        inline ansi::fg to_fg(rogu::col c)
         {
             return static_cast<ansi::fg>(static_cast<int>(c) + 30);
         }
 
-        inline ansi::bg to_bg(logger::col c)
+        inline ansi::bg to_bg(rogu::col c)
         {
             return static_cast<ansi::bg>(static_cast<int>(c) + 40);
         }
@@ -306,7 +306,7 @@ namespace rogu
         {
             int pop_nobreak = trailing_no_break_marker(s);
             std::string_view formatted_str = s.substr(0, s.size() - pop_nobreak);
-            std::string message = std::format("{}{}", logger::colorise(colour, prefix), 
+            std::string message = std::format("{}{}", rogu::colorise(colour, prefix), 
                                               std::vformat(formatted_str, std::make_format_args(args...)));
             for (auto* stream : get_outputs())
                 *stream << message;
@@ -386,10 +386,10 @@ namespace rogu
                 int pop_nobreak = trailing_no_break_marker(s);
                 std::string formatted;
                 if constexpr (sizeof...(args) == 0)
-                    formatted = std::format("{}{}", logger::colorise(Traits::colour, prefix),
+                    formatted = std::format("{}{}", rogu::colorise(Traits::colour, prefix),
                                             s.substr(0, s.size() - pop_nobreak));
                 else
-                    formatted = std::format("{}{}", logger::colorise(Traits::colour, prefix),
+                    formatted = std::format("{}{}", rogu::colorise(Traits::colour, prefix),
                                             std::vformat(s.substr(0, s.size() - pop_nobreak), 
                                                          std::make_format_args(args...)));
                 
@@ -404,10 +404,10 @@ namespace rogu
             int pop_nobreak = trailing_no_break_marker(s);
             std::string formatted;
             if constexpr (sizeof...(args) == 0)
-                formatted = std::format("{}{}", logger::colorise(Traits::colour, prefix),
+                formatted = std::format("{}{}", rogu::colorise(Traits::colour, prefix),
                                         s.substr(0, s.size() - pop_nobreak));
             else
-                formatted = std::format("{}{}", logger::colorise(Traits::colour, prefix),
+                formatted = std::format("{}{}", rogu::colorise(Traits::colour, prefix),
                                         std::vformat(s.substr(0, s.size() - pop_nobreak), 
                                                      std::make_format_args(args...)));
             for (auto* stream : active_streams)
@@ -509,4 +509,4 @@ namespace rogu
 #endif    
 }
 
-#endif // LOGGER_INCLUDE_GUARD
+#endif // KIROKU_INCLUDE
