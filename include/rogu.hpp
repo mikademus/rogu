@@ -91,7 +91,7 @@
 //      rogu::disable_log_level(rogu::log_level::debug);
 //      rogu::enable_log_level(rogu::log_level::debug);
 //
-// Per-stream control requires ROGU_LOGLEVEL_PER_STREAM:
+// Per-stream control requires ROGU_PER_STREAM:
 //      rogu::delegate_log_level(rogu::log_level::debug);   // hand off to per-stream
 //      rogu::enable_log_level_for_stream(&std::cout, rogu::log_level::debug);
 //      rogu::disable_log_level_for_stream(&logfile,  rogu::log_level::debug);
@@ -125,7 +125,7 @@
 //
 //      #define ROGU_ANSI                // Enable ANSI colour output
 //      #define ROGU_ASYNC               // Enable asynchronous logging
-//      #define ROGU_LOGLEVEL_PER_STREAM // Enable per-stream level control
+//      #define ROGU_PER_STREAM          // Enable per-stream level control
 //      #define ROGU_SOURCE_LOCATION     // Enable {trace} source location token
 //      #define ROGU_TIMESTAMP           // Enable {time} UTC timestamp token
 //
@@ -135,7 +135,7 @@
 // Uncomment to enable feature:
 #define ROGU_ANSI            /* Enable ANSI colour output */
 #define ROGU_ASYNC           /* Enable asynchronous logging */
-#define ROGU_LOGLEVEL_PER_STREAM
+#define ROGU_PER_STREAM      /* Enable per-stream settings */
 #define ROGU_SOURCE_LOCATION /* Enable trace source log location */
 #define ROGU_TIMESTAMP       /* Enable time/datestamps */
 
@@ -183,34 +183,56 @@ namespace rogu
         record
     };
 
-    // log_levels() assume that no more than seven distinct levels exist and
-    // represent these as bitmasks in a uint8_t. This guards against breaking this limit:
-    static_assert(static_cast<int>(log_level::record) < 8,
-        "log_level has exceeded 7 values; uint8_t per-stream bitmask is no longer sufficient");
-
-    enum struct log_flags : uint8_t
+    enum struct log_flags : uint16_t
     {
-        none        = 0,
-        no_break    = 1 << 0,   // Suppress newline after the log event
-        msg_only    = 1 << 1,   // Suppress all other fields than the message from the log event
-        no_time     = 1 << 2,   // Suppress the time field from the log event
-        force_time  = 1 << 3,   // Force the output of the log event time, if ROGU_TIMESTAMP has been defined
+        none         = 0,
+        no_break     = 1 << 0,   // Suppress trailing newline
+        no_time      = 1 << 1,   // Suppress {time} for this call
+        force_time   = 1 << 2,   // Force {time} for this call, overrides no_time
+        no_ll        = 1 << 3,   // Suppress {ll} for this call
+        force_ll     = 1 << 4,   // Force {ll} for this call
+        no_msg       = 1 << 5,   // Suppress {msg} for this call
+        force_msg    = 1 << 6,   // Force {msg} for this call
+        no_trace     = 1 << 7,   // Suppress {trace} for this call
+        force_trace  = 1 << 8,   // Force {trace} for this call
+        msg_only     = no_time | no_ll | no_trace,  // Suppress all fields except {msg}
+        // Note: if fields are added, update msg_only accordingly.
     };
 
     inline constexpr log_flags operator|(log_flags a, log_flags b)
     {
-        return static_cast<log_flags>(static_cast<uint8_t>(a) | static_cast<uint8_t>(b));
+        return static_cast<log_flags>(static_cast<uint16_t>(a) | static_cast<uint16_t>(b));
     }
 
     inline constexpr bool has_flag(log_flags flags, log_flags f)
     {
-        return static_cast<uint8_t>(flags) & static_cast<uint8_t>(f);
+        return static_cast<uint16_t>(flags) & static_cast<uint16_t>(f);
     }
 
     inline constexpr log_flags no_break   = log_flags::no_break;
-    inline constexpr log_flags msg_only   = log_flags::msg_only;
     inline constexpr log_flags no_time    = log_flags::no_time;
     inline constexpr log_flags force_time = log_flags::force_time;
+    inline constexpr log_flags no_ll      = log_flags::no_ll;
+    inline constexpr log_flags force_ll   = log_flags::force_ll;
+    inline constexpr log_flags no_msg     = log_flags::no_msg;
+    inline constexpr log_flags force_msg  = log_flags::force_msg;
+    inline constexpr log_flags no_trace   = log_flags::no_trace;
+    inline constexpr log_flags force_trace = log_flags::force_trace;
+    inline constexpr log_flags msg_only   = log_flags::msg_only;
+
+    static_assert(static_cast<int>(log_level::record) < 8,
+        "log_level has exceeded 7 values; uint8_t per-stream bitmask is no longer sufficient");
+
+    enum struct field : uint8_t
+    {
+        time,
+        ll,
+        msg,
+        trace
+    };
+
+    static_assert(static_cast<int>(field::trace) < 8,
+        "field has exceeded 7 values; uint8_t per-stream field bitmask is no longer sufficient");
 
     enum col
     {
@@ -292,6 +314,7 @@ namespace rogu
             rogu::col           level_colour;
             std::string_view    message;
             rogu::log_flags     flags;
+            uint8_t             active_fields;  // bitmask of rogu::field values
 #ifdef ROGU_TIMESTAMP
             std::chrono::sys_seconds timestamp;
 #endif
@@ -306,8 +329,9 @@ namespace rogu
         struct stream_entry
         {
             std::ostream*   stream;
-#ifdef ROGU_LOGLEVEL_PER_STREAM
+#ifdef ROGU_PER_STREAM
             uint8_t         level_bits = 0b1111111;
+            uint8_t         field_bits = 0b1111;
 #endif
             std::string     format_str;
         };
@@ -322,12 +346,22 @@ namespace rogu
 
             static ll_state (&master_levels())[7]
             {
-#ifdef ROGU_LOGLEVEL_PER_STREAM
+#ifdef ROGU_PER_STREAM
                 static ll_state levels[7] = {ll_state::per_stream, ll_state::per_stream, ll_state::per_stream, ll_state::per_stream, ll_state::per_stream, ll_state::per_stream, ll_state::on};
 #else
                 static ll_state levels[7] = {ll_state::on, ll_state::on, ll_state::on, ll_state::on, ll_state::on, ll_state::on, ll_state::on};
 #endif
                 return levels;
+            }
+
+            static ll_state (&master_fields())[4]
+            {
+#ifdef ROGU_PER_STREAM
+                static ll_state fields[4] = {ll_state::per_stream, ll_state::per_stream, ll_state::per_stream, ll_state::per_stream};
+#else
+                static ll_state fields[4] = {ll_state::on, ll_state::on, ll_state::on, ll_state::on};
+#endif
+                return fields;
             }
         };
 
@@ -362,35 +396,37 @@ namespace rogu
                     std::string_view token(format_str.data() + i + 1, close - i - 1);
                     if (token == "msg")
                     {
-                        out = &result.after_msg;
+                        if (e.active_fields & (1 << (int) rogu::field::msg))
+                            out = &result.after_msg;
                         result.msg_seen = true;
                     }
                     else if (token == "ll")
                     {
+                        if (e.active_fields & (1 << (int) rogu::field::ll))
+                        {
 #ifdef ROGU_ANSI
-                        *out += rogu::colorise(e.level_colour, e.level_str);
+                            *out += rogu::colorise(e.level_colour, e.level_str);
 #else
-                        *out += e.level_str;
+                            *out += e.level_str;
 #endif
+                        }
                     }
                     else if (token == "time")
                     {
 #ifdef ROGU_TIMESTAMP
-                        bool suppress = has_flag(e.flags, rogu::log_flags::no_time)
-                                     && !has_flag(e.flags, rogu::log_flags::force_time);
-                        if (!suppress)
+                        if (e.active_fields & (1 << (int) rogu::field::time))
                             *out += std::format("{:%H:%M:%S} ", e.timestamp);
 #endif
                     }
                     else if (token == "trace")
                     {
 #ifdef ROGU_SOURCE_LOCATION
-                        *out += std::format("{}:{}", e.location.file_name(), e.location.line());
+                        if (e.active_fields & (1 << (int) rogu::field::trace))
+                            *out += std::format("{}:{}", e.location.file_name(), e.location.line());
 #endif
                     }
                     else
                     {
-                        // Unrecognised token — pass through literally
                         *out += '{';
                         *out += token;
                         *out += '}';
@@ -412,14 +448,22 @@ namespace rogu
 
         inline std::mutex output_mutex;
 
-#ifdef ROGU_LOGLEVEL_PER_STREAM    
+#ifdef ROGU_PER_STREAM    
         inline bool ll_enabled(uint8_t state, log_level ll)
         {
             return state & (1 << (int) ll);
         }
 
+        inline bool field_enabled(uint8_t state, rogu::field f)
+        {
+            return state & (1 << (int) f);
+        }
+
         inline void set_bits(uint8_t& bits, log_level mask) { bits |= 1 << (int) mask; }
         inline void clear_bits(uint8_t& bits, log_level mask) { bits &= ~(1 << (int) mask); }
+
+        inline void set_field_bits(uint8_t& bits, rogu::field mask) { bits |= 1 << (int) mask; }
+        inline void clear_field_bits(uint8_t& bits, rogu::field mask) { bits &= ~(1 << (int) mask); }
 #endif
 
 #ifdef ROGU_ASYNC
@@ -582,8 +626,9 @@ namespace rogu
                 stream_entry entry;
                 entry.stream = &cnull;
                 entry.format_str = default_format_str;
-#ifdef ROGU_LOGLEVEL_PER_STREAM
+#ifdef ROGU_PER_STREAM
                 entry.level_bits = 0b1111111;
+                entry.field_bits = 0b1111;
 #endif
                 logger_state::entries().push_back(std::move(entry));
             }
@@ -595,6 +640,52 @@ namespace rogu
             static constexpr log_level level = Level;
             static constexpr col colour = Colour;
         };
+
+        inline uint8_t resolve_fields(const stream_entry& entry, rogu::log_flags flags)
+        {
+            uint8_t result = 0;
+            for (int i = 0; i <= (int) rogu::field::trace; ++i)
+            {
+                auto f = static_cast<rogu::field>(i);
+                auto master = logger_state::master_fields()[i];
+
+                bool active = false;
+                if (master == ll_state::on)
+                    active = true;
+                else if (master == ll_state::off)
+                    active = false;
+#ifdef ROGU_PER_STREAM
+                else if (master == ll_state::per_stream)
+                    active = field_enabled(entry.field_bits, f);
+#else
+                else
+                    active = true;
+#endif
+                // Per-call flags are the final override layer.
+                // Precedence: force > no > global/per-stream state.
+                switch (f)
+                {
+                    case rogu::field::time:
+                        if (has_flag(flags, rogu::log_flags::force_time)) active = true;
+                        else if (has_flag(flags, rogu::log_flags::no_time)) active = false;
+                        break;
+                    case rogu::field::ll:
+                        if (has_flag(flags, rogu::log_flags::force_ll)) active = true;
+                        else if (has_flag(flags, rogu::log_flags::no_ll)) active = false;
+                        break;
+                    case rogu::field::msg:
+                        if (has_flag(flags, rogu::log_flags::force_msg)) active = true;
+                        else if (has_flag(flags, rogu::log_flags::no_msg)) active = false;
+                        break;
+                    case rogu::field::trace:
+                        if (has_flag(flags, rogu::log_flags::force_trace)) active = true;
+                        else if (has_flag(flags, rogu::log_flags::no_trace)) active = false;
+                        break;
+                }
+                if (active) result |= (1 << i);
+            }
+            return result;
+        }
 
         template <typename Traits, typename... Args>
         stream_wrapper log(std::string_view prefix, log_flags flags,
@@ -620,7 +711,7 @@ namespace rogu
                     include = true;
                 else if (master_state == ll_state::per_stream)
                 {
-#ifdef ROGU_LOGLEVEL_PER_STREAM
+#ifdef ROGU_PER_STREAM
                     include = ll_enabled(entry.level_bits, Traits::level);
 #else
                     include = true;
@@ -685,17 +776,26 @@ namespace rogu
             std::string after_msg_str;
             for (auto* entry : active_entries)
             {
-                if (has_flag(flags, log_flags::msg_only))
+                log_event event
                 {
+                    .level         = Traits::level,
+                    .level_str     = prefix,
+                    .level_colour  = Traits::colour,
+                    .message       = message,
+                    .flags         = flags,
+                    .active_fields = resolve_fields(*entry, flags),
+#ifdef ROGU_TIMESTAMP
+                    .timestamp     = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()),
+#endif
+#ifdef ROGU_SOURCE_LOCATION
+                    .location      = fwl.loc,
+#endif
+                };
+                rendered_event r = render(entry->format_str, event);
+                *entry->stream << r.before_msg;
+                if (r.msg_seen && (event.active_fields & (1 << (int) rogu::field::msg)))
                     *entry->stream << message;
-                }
-                else
-                {
-                    rendered_event r = render(entry->format_str, event);
-                    *entry->stream << r.before_msg;
-                    if (r.msg_seen) *entry->stream << message;
-                    after_msg_str = std::move(r.after_msg);
-                }
+                after_msg_str = std::move(r.after_msg);
                 active_streams.push_back(entry->stream);
             }
             return stream_wrapper{std::move(active_streams), std::move(after_msg_str), pop_nobreak == 1};
@@ -837,11 +937,14 @@ template<typename... Args>
         if (!stream) return;
         std::lock_guard<std::mutex> lock(impl::output_mutex);
         impl::initialise_outputs_locked();
-        impl::logger_state::entries().push_back({stream,
-#ifdef ROGU_LOGLEVEL_PER_STREAM
-            0b1111111,
+        impl::stream_entry entry;
+        entry.stream = stream;
+        entry.format_str = std::move(format_str);
+#ifdef ROGU_PER_STREAM
+        entry.level_bits = 0b1111111;
+        entry.field_bits = 0b1111;
 #endif
-            std::move(format_str)});
+        impl::logger_state::entries().push_back(std::move(entry));
     }
 
     inline void set_formatter(std::ostream* stream, std::string format_str)
@@ -865,7 +968,17 @@ template<typename... Args>
         impl::logger_state::master_levels()[(int) ll] = impl::ll_state::on;
     }
 
-#ifdef ROGU_LOGLEVEL_PER_STREAM    
+    inline void disable_field(rogu::field f)
+    {
+        impl::logger_state::master_fields()[(int) f] = impl::ll_state::off;
+    }
+
+    inline void enable_field(rogu::field f)
+    {
+        impl::logger_state::master_fields()[(int) f] = impl::ll_state::on;
+    }
+
+#ifdef ROGU_PER_STREAM    
     inline void delegate_log_level(log_level ll)
     {
         impl::logger_state::master_levels()[(int) ll] = impl::ll_state::per_stream;
@@ -884,7 +997,26 @@ template<typename... Args>
         for (auto& entry : impl::logger_state::entries())
             if (entry.stream == s) impl::set_bits(entry.level_bits, ll);
     }
-#endif    
+
+    inline void delegate_field(rogu::field f)
+    {
+        impl::logger_state::master_fields()[(int) f] = impl::ll_state::per_stream;
+    }
+
+    inline void disable_field_for_stream(std::ostream* s, rogu::field f)
+    {
+        std::lock_guard<std::mutex> lock(impl::output_mutex);
+        for (auto& entry : impl::logger_state::entries())
+            if (entry.stream == s) impl::clear_field_bits(entry.field_bits, f);
+    }
+
+    inline void enable_field_for_stream(std::ostream* s, rogu::field f)
+    {
+        std::lock_guard<std::mutex> lock(impl::output_mutex);
+        for (auto& entry : impl::logger_state::entries())
+            if (entry.stream == s) impl::set_field_bits(entry.field_bits, f);
+    }
+#endif
 }
 
 #endif // KIROKU_INCLUDE

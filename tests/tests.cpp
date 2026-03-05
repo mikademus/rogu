@@ -471,6 +471,281 @@ bool test_async_record_bypasses_filter()
 }
 #endif
 
+//============================================================================
+// FIELD CONTROL — GLOBAL
+//============================================================================
+
+bool test_disable_field_time()
+{
+#ifdef ROGU_TIMESTAMP
+    std::ostringstream ss;
+    capture(ss);
+    rogu::set_formatter(&ss, "{time}{msg}");
+    rogu::disable_field(rogu::field::time);
+    rogu::info("no_timestamp");
+    rogu::enable_field(rogu::field::time);
+    std::string out = strip_ansi(ss.str());
+    REQUIRE(!contains(out, ":"), "disabled time field should produce no timestamp");
+    REQUIRE(contains(out, "no_timestamp"), "message should still appear");
+#endif
+    return true;
+}
+
+bool test_disable_field_ll()
+{
+    std::ostringstream ss;
+    capture(ss);
+    rogu::set_formatter(&ss, "{ll} {msg}");
+    rogu::disable_field(rogu::field::ll);
+    rogu::info("no_level");
+    rogu::enable_field(rogu::field::ll);
+    std::string out = strip_ansi(ss.str());
+    REQUIRE(!contains(out, "info"), "disabled ll field should produce no level string");
+    REQUIRE(contains(out, "no_level"), "message should still appear");
+    return true;
+}
+
+bool test_disable_field_msg()
+{
+    std::ostringstream ss;
+    capture(ss);
+    rogu::set_formatter(&ss, "{ll} {msg}");
+    rogu::disable_field(rogu::field::msg);
+    rogu::info("invisible");
+    rogu::enable_field(rogu::field::msg);
+    std::string out = strip_ansi(ss.str());
+    REQUIRE(!contains(out, "invisible"), "disabled msg field should suppress message body");
+    return true;
+}
+
+bool test_disable_field_trace()
+{
+#ifdef ROGU_SOURCE_LOCATION
+    std::ostringstream ss;
+    capture(ss);
+    rogu::set_formatter(&ss, "{msg} {trace}");
+    rogu::disable_field(rogu::field::trace);
+    rogu::info("no_trace");
+    rogu::enable_field(rogu::field::trace);
+    std::string out = strip_ansi(ss.str());
+    REQUIRE(!contains(out, "tests.cpp"), "disabled trace field should produce no source location");
+    REQUIRE(contains(out, "no_trace"), "message should still appear");
+#endif
+    return true;
+}
+
+bool test_enable_field_restores_output()
+{
+    std::ostringstream ss;
+    capture(ss);
+    rogu::set_formatter(&ss, "{ll} {msg}");
+    rogu::disable_field(rogu::field::ll);
+    rogu::enable_field(rogu::field::ll);
+    rogu::info("restored");
+    std::string out = strip_ansi(ss.str());
+    REQUIRE(contains(out, "info"), "re-enabled field should produce output");
+    return true;
+}
+
+
+//============================================================================
+// FIELD CONTROL — PER-CALL FLAGS
+//============================================================================
+
+bool test_flag_no_ll()
+{
+    std::ostringstream ss;
+    capture(ss);
+    rogu::set_formatter(&ss, "{ll} {msg}");
+    rogu::info(rogu::no_ll, "bare");
+    std::string out = strip_ansi(ss.str());
+    REQUIRE(!contains(out, "info"), "no_ll flag should suppress level for this call");
+    REQUIRE(contains(out, "bare"), "message should still appear");
+    return true;
+}
+
+bool test_flag_force_ll_overrides_disable()
+{
+    std::ostringstream ss;
+    capture(ss);
+    rogu::set_formatter(&ss, "{ll} {msg}");
+    rogu::disable_field(rogu::field::ll);
+    rogu::info(rogu::force_ll, "forced");
+    rogu::enable_field(rogu::field::ll);
+    std::string out = strip_ansi(ss.str());
+    REQUIRE(contains(out, "info"), "force_ll should override global disable");
+    return true;
+}
+
+bool test_flag_no_msg()
+{
+    std::ostringstream ss;
+    capture(ss);
+    rogu::set_formatter(&ss, "{ll} {msg}");
+    rogu::info(rogu::no_msg, "suppressed");
+    std::string out = strip_ansi(ss.str());
+    REQUIRE(!contains(out, "suppressed"), "no_msg flag should suppress message body");
+    REQUIRE(contains(out, "info"), "level should still appear");
+    return true;
+}
+
+bool test_flag_force_msg_overrides_disable()
+{
+    std::ostringstream ss;
+    capture(ss);
+    rogu::set_formatter(&ss, "{ll} {msg}");
+    rogu::disable_field(rogu::field::msg);
+    rogu::info(rogu::force_msg, "forced_msg");
+    rogu::enable_field(rogu::field::msg);
+    std::string out = strip_ansi(ss.str());
+    REQUIRE(contains(out, "forced_msg"), "force_msg should override global disable");
+    return true;
+}
+
+bool test_flag_no_trace()
+{
+#ifdef ROGU_SOURCE_LOCATION
+    std::ostringstream ss;
+    capture(ss);
+    rogu::set_formatter(&ss, "{msg} {trace}");
+    rogu::info(rogu::no_trace, "no_loc");
+    std::string out = strip_ansi(ss.str());
+    REQUIRE(!contains(out, "tests.cpp"), "no_trace flag should suppress source location");
+    REQUIRE(contains(out, "no_loc"), "message should still appear");
+#endif
+    return true;
+}
+
+bool test_flag_force_trace_overrides_disable()
+{
+#ifdef ROGU_SOURCE_LOCATION
+    std::ostringstream ss;
+    capture(ss);
+    rogu::set_formatter(&ss, "{msg} {trace}");
+    rogu::disable_field(rogu::field::trace);
+    rogu::info(rogu::force_trace, "loc_forced");
+    rogu::enable_field(rogu::field::trace);
+    std::string out = strip_ansi(ss.str());
+    REQUIRE(contains(out, "tests.cpp"), "force_trace should override global disable");
+#endif
+    return true;
+}
+
+bool test_flag_no_time_per_call()
+{
+#ifdef ROGU_TIMESTAMP
+    std::ostringstream ss;
+    capture(ss);
+    rogu::set_formatter(&ss, "{time}{msg}");
+    rogu::info(rogu::no_time, "untimed");
+    std::string out = strip_ansi(ss.str());
+    REQUIRE(out.find("untimed") == 0, "no_time flag should suppress timestamp; message should be first");
+#endif
+    return true;
+}
+
+bool test_flag_force_time_overrides_no_time()
+{
+#ifdef ROGU_TIMESTAMP
+    std::ostringstream ss;
+    capture(ss);
+    rogu::set_formatter(&ss, "{time}{msg}");
+    rogu::info(rogu::no_time | rogu::force_time, "timed");
+    std::string out = strip_ansi(ss.str());
+    REQUIRE(before(out, ":", "timed"), "force_time should override no_time");
+#endif
+    return true;
+}
+
+
+//============================================================================
+// MSG_ONLY COMPOSITE
+//============================================================================
+
+bool test_msg_only_suppresses_ll_time_trace()
+{
+    std::ostringstream ss;
+    capture(ss);
+    rogu::set_formatter(&ss, "{time}{ll} {msg} {trace}");
+    rogu::info(rogu::msg_only, "only_msg");
+    std::string out = strip_ansi(ss.str());
+    REQUIRE(contains(out, "only_msg"), "message should appear with msg_only");
+    REQUIRE(!contains(out, "info"), "ll should be suppressed by msg_only");
+#ifdef ROGU_SOURCE_LOCATION
+    REQUIRE(!contains(out, "tests.cpp"), "trace should be suppressed by msg_only");
+#endif
+#ifdef ROGU_TIMESTAMP
+    std::string trimmed = out;
+    trimmed.erase(0, trimmed.find_first_not_of(' '));
+    REQUIRE(trimmed.find("only_msg") == 0,
+        "time should be suppressed by msg_only; message should be first after trimming decoration");
+#endif
+    return true;
+}
+
+bool test_msg_only_does_not_suppress_msg()
+{
+    std::ostringstream ss;
+    capture(ss);
+    rogu::set_formatter(&ss, "{ll} {msg}");
+    rogu::info(rogu::msg_only, "present");
+    std::string out = strip_ansi(ss.str());
+    REQUIRE(contains(out, "present"), "msg_only should not suppress the message itself");
+    return true;
+}
+
+
+//============================================================================
+// FIELD CONTROL — PER-STREAM
+//============================================================================
+
+#ifdef ROGU_PER_STREAM
+bool test_per_stream_field_disable()
+{
+    reset_rogu();
+    std::ostringstream full, stripped;
+    rogu::add_output(&full,    "{ll} {msg}");
+    rogu::add_output(&stripped, "{ll} {msg}");
+
+    rogu::delegate_field(rogu::field::ll);
+    rogu::enable_field_for_stream(&full,    rogu::field::ll);
+    rogu::disable_field_for_stream(&stripped, rogu::field::ll);
+
+    rogu::info("body");
+
+    std::string out_full    = strip_ansi(full.str());
+    std::string out_stripped = strip_ansi(stripped.str());
+
+    EXPECT(contains(out_full, "info"),     "full stream should receive ll field");
+    EXPECT(!contains(out_stripped, "info"), "stripped stream should not receive ll field");
+    EXPECT(contains(out_full, "body"),     "full stream should receive message");
+    EXPECT(contains(out_stripped, "body"), "stripped stream should receive message");
+
+    rogu::enable_field(rogu::field::ll);
+    return true;
+}
+
+bool test_per_stream_field_independent_of_level_bits()
+{
+    reset_rogu();
+    std::ostringstream ss;
+    rogu::add_output(&ss, "{ll} {msg}");
+
+    // Field and level controls should be orthogonal.
+    rogu::delegate_field(rogu::field::ll);
+    rogu::disable_field_for_stream(&ss, rogu::field::ll);
+
+    // Level is still enabled — message should reach the stream.
+    rogu::info("reaches");
+
+    std::string out = strip_ansi(ss.str());
+    EXPECT(contains(out, "reaches"),  "message should reach stream when only field is disabled");
+    EXPECT(!contains(out, "info"),    "ll field should be suppressed per-stream");
+
+    rogu::enable_field(rogu::field::ll);
+    return true;
+}
+#endif
 
 //============================================================================
 // MAIN
@@ -520,6 +795,33 @@ int main()
     RUN_TEST(test_async_messages_reach_stream);
     RUN_TEST(test_async_ordering_single_thread);
     RUN_TEST(test_async_record_bypasses_filter);
+#endif
+
+SUBCAT("field control - global");
+    RUN_TEST(test_disable_field_time);
+    RUN_TEST(test_disable_field_ll);
+    RUN_TEST(test_disable_field_msg);
+    RUN_TEST(test_disable_field_trace);
+    RUN_TEST(test_enable_field_restores_output);
+
+    SUBCAT("field control - per-call flags");
+    RUN_TEST(test_flag_no_ll);
+    RUN_TEST(test_flag_force_ll_overrides_disable);
+    RUN_TEST(test_flag_no_msg);
+    RUN_TEST(test_flag_force_msg_overrides_disable);
+    RUN_TEST(test_flag_no_trace);
+    RUN_TEST(test_flag_force_trace_overrides_disable);
+    RUN_TEST(test_flag_no_time_per_call);
+    RUN_TEST(test_flag_force_time_overrides_no_time);
+
+    SUBCAT("msg_only composite");
+    RUN_TEST(test_msg_only_suppresses_ll_time_trace);
+    RUN_TEST(test_msg_only_does_not_suppress_msg);
+
+#ifdef ROGU_PER_STREAM
+    SUBCAT("field control - per-stream");
+    RUN_TEST(test_per_stream_field_disable);
+    RUN_TEST(test_per_stream_field_independent_of_level_bits);
 #endif
 
     maat::print_summary();
