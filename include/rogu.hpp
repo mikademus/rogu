@@ -1,5 +1,6 @@
-//============================================================================
+//=========S===================================================================
 // rogu: The Kiroku Logger
+// version: 0.6.0
 //============================================================================
 //
 // INVOKATION:
@@ -24,9 +25,9 @@
 // LINE BREAKS
 //-----------------
 // The logger automatically inserts a line feed after each string. 
-// Adding '$' at end of string (inspired by regex EOL marker) 
-// prevents automatic line break.
-//      rogu::info("This line will not break$");
+// To suppress it, pass the no_break flag:
+//      rogu::info(rogu::no_break, "Loading...");
+//      rogu::info(rogu::msg_only, " done");
 //
 // COMPILE TIME CONTROLS
 //-------------------------
@@ -93,6 +94,30 @@ namespace rogu
     // represent these as bitmasks in a uint8_t. This guards against breaking this limit:
     static_assert(static_cast<int>(log_level::record) < 8,
         "log_level has exceeded 7 values; uint8_t per-stream bitmask is no longer sufficient");
+
+    enum struct log_flags : uint8_t
+    {
+        none        = 0,
+        no_break    = 1 << 0,   // Suppress newline after the log event
+        msg_only    = 1 << 1,   // Suppress all other fields than the message from the log event
+        no_time     = 1 << 2,   // Suppress the time field from the log event
+        force_time  = 1 << 3,   // Force the output of the log event time, if ROGU_TIMESTAMP has been defined
+    };
+
+    inline constexpr log_flags operator|(log_flags a, log_flags b)
+    {
+        return static_cast<log_flags>(static_cast<uint8_t>(a) | static_cast<uint8_t>(b));
+    }
+
+    inline constexpr bool has_flag(log_flags flags, log_flags f)
+    {
+        return static_cast<uint8_t>(flags) & static_cast<uint8_t>(f);
+    }
+
+    inline constexpr log_flags no_break   = log_flags::no_break;
+    inline constexpr log_flags msg_only   = log_flags::msg_only;
+    inline constexpr log_flags no_time    = log_flags::no_time;
+    inline constexpr log_flags force_time = log_flags::force_time;
 
     enum col
     {
@@ -165,27 +190,46 @@ namespace rogu
 
     namespace impl
     {
+        inline constexpr const char* default_format_str = "{time}{ll} {msg} ({trace})";
+
+        struct log_event
+        {
+            log_level           level;
+            std::string_view    level_str;
+            rogu::col           level_colour;
+            std::string_view    message;
+            rogu::log_flags     flags;
+#ifdef ROGU_TIMESTAMP
+            std::chrono::sys_seconds timestamp;
+#endif
+#ifdef ROGU_SOURCE_LOCATION
+            std::source_location location;
+#endif
+        };
+
+
         enum struct ll_state { off = -1, per_stream = 0, on = 1 };
+
+        struct stream_entry
+        {
+            std::ostream*   stream;
+#ifdef ROGU_LOGLEVEL_PER_STREAM
+            uint8_t         level_bits = 0b1111111;
+#endif
+            std::string     format_str;
+        };
 
         struct logger_state
         {
-            static std::vector<std::ostream*>& outputs()
+            static std::vector<stream_entry>& entries()
             {
-                static std::vector<std::ostream*> outputs;
-                return outputs;
+                static std::vector<stream_entry> entries;
+                return entries;
             }
-
-#ifdef ROGU_LOGLEVEL_PER_STREAM    
-            static std::vector<std::pair<std::ostream*, uint8_t>>& log_levels()
-            {
-                static std::vector<std::pair<std::ostream*, uint8_t>> levels;
-                return levels;
-            }
-#endif
 
             static ll_state (&master_levels())[7]
             {
-#ifdef ROGU_LOGLEVEL_PER_STREAM    
+#ifdef ROGU_LOGLEVEL_PER_STREAM
                 static ll_state levels[7] = {ll_state::per_stream, ll_state::per_stream, ll_state::per_stream, ll_state::per_stream, ll_state::per_stream, ll_state::per_stream, ll_state::on};
 #else
                 static ll_state levels[7] = {ll_state::on, ll_state::on, ll_state::on, ll_state::on, ll_state::on, ll_state::on, ll_state::on};
@@ -194,7 +238,84 @@ namespace rogu
             }
         };
 
-        inline std::vector<std::ostream*>& get_outputs() { return logger_state::outputs(); }
+        struct rendered_event
+        {
+            std::string before_msg;
+            std::string after_msg;
+            bool        msg_seen = false;
+        };
+
+        inline rendered_event render(const std::string& format_str, const log_event& e)
+        {
+            rendered_event result;
+            std::string* out = &result.before_msg;
+            std::size_t i = 0;
+            while (i < format_str.size())
+            {
+                if (format_str[i] == '{')
+                {
+                    if (i + 1 < format_str.size() && format_str[i + 1] == '{')
+                    {
+                        *out += '{';
+                        i += 2;
+                        continue;
+                    }
+                    std::size_t close = format_str.find('}', i + 1);
+                    if (close == std::string::npos)
+                    {
+                        *out += format_str[i++];
+                        continue;
+                    }
+                    std::string_view token(format_str.data() + i + 1, close - i - 1);
+                    if (token == "msg")
+                    {
+                        out = &result.after_msg;
+                        result.msg_seen = true;
+                    }
+                    else if (token == "ll")
+                    {
+#ifdef ROGU_ANSI
+                        *out += rogu::colorise(e.level_colour, e.level_str);
+#else
+                        *out += e.level_str;
+#endif
+                    }
+                    else if (token == "time")
+                    {
+#ifdef ROGU_TIMESTAMP
+                        bool suppress = has_flag(e.flags, rogu::log_flags::no_time)
+                                     && !has_flag(e.flags, rogu::log_flags::force_time);
+                        if (!suppress)
+                            *out += std::format("{:%H:%M:%S} ", e.timestamp);
+#endif
+                    }
+                    else if (token == "trace")
+                    {
+#ifdef ROGU_SOURCE_LOCATION
+                        *out += std::format("{}:{}", e.location.file_name(), e.location.line());
+#endif
+                    }
+                    else
+                    {
+                        // Unrecognised token — pass through literally
+                        *out += '{';
+                        *out += token;
+                        *out += '}';
+                    }
+                    i = close + 1;
+                }
+                else if (format_str[i] == '}' && i + 1 < format_str.size() && format_str[i + 1] == '}')
+                {
+                    *out += '}';
+                    i += 2;
+                }
+                else
+                {
+                    *out += format_str[i++];
+                }
+            }
+            return result;
+        }
 
         inline std::mutex output_mutex;
 
@@ -287,18 +408,20 @@ namespace rogu
         struct stream_wrapper
         {
             std::vector<std::ostream*> streams;
-            bool no_line_break{true};
+            std::string                after_msg;
+            bool                       no_line_break{true};
 
             stream_wrapper() : no_line_break(true) {}
-            stream_wrapper(std::vector<std::ostream*> s, bool nlb) : streams(std::move(s)), no_line_break(nlb) {}
+            stream_wrapper(std::vector<std::ostream*> s, std::string after, bool nlb)
+                : streams(std::move(s)), after_msg(std::move(after)), no_line_break(nlb) {}
 
             ~stream_wrapper()
             {
                 for (auto* stream : streams)
 #ifdef ROGU_ANSI
-                    *stream << ansi::reset_colours_code << (no_line_break ? "" : "\n");
+                    *stream << after_msg << ansi::reset_colours_code << (no_line_break ? "" : "\n");
 #else
-                    *stream << (no_line_break ? "" : "\n");
+                    *stream << after_msg << (no_line_break ? "" : "\n");
 #endif
             }
 
@@ -344,11 +467,6 @@ namespace rogu
         }
 #endif        
 
-        inline int trailing_no_break_marker(std::string_view s)
-        {            
-            return s.ends_with('$') ? 1 : 0;            
-        }
-
         struct null_buffer : std::streambuf 
         {
             int overflow(int c) override { return traits_type::not_eof(c); }
@@ -363,11 +481,19 @@ namespace rogu
 
         inline null_stream cnull;        
 
-        inline void initialise_outputs_locked() 
+        inline void initialise_outputs_locked()
         {
-            // Note: Make certain a mutex is held before calling.
-            if (get_outputs().empty())
-                get_outputs().push_back(&cnull);
+            // Note: caller must hold output_mutex.
+            if (logger_state::entries().empty())
+            {
+                stream_entry entry;
+                entry.stream = &cnull;
+                entry.format_str = default_format_str;
+#ifdef ROGU_LOGLEVEL_PER_STREAM
+                entry.level_bits = 0b1111111;
+#endif
+                logger_state::entries().push_back(std::move(entry));
+            }
         }
 
         template <log_level Level, col Colour>
@@ -377,21 +503,22 @@ namespace rogu
             static constexpr col colour = Colour;
         };
 
-template <typename Traits, typename... Args>
-        stream_wrapper log(std::string_view prefix, format_with_location fwl = {""}, Args&&... args)
+        template <typename Traits, typename... Args>
+        stream_wrapper log(std::string_view prefix, log_flags flags,
+                           format_with_location fwl = {""}, Args&&... args)
         {
             std::lock_guard<std::mutex> lock(output_mutex);
             initialise_outputs_locked();
             if (Traits::level != log_level::record && logger_state::master_levels()[(int) Traits::level] == ll_state::off)
                 return stream_wrapper{};
 
-            static thread_local std::vector<std::ostream*> active_streams;
-            active_streams.clear();
-            for (auto* stream : get_outputs())
+            static thread_local std::vector<stream_entry*> active_entries;
+            active_entries.clear();
+            for (auto& entry : logger_state::entries())
             {
                 if (Traits::level == log_level::record)
                 {
-                    active_streams.push_back(stream);
+                    active_entries.push_back(&entry);
                     continue;
                 }
                 auto master_state = logger_state::master_levels()[(int) Traits::level];
@@ -401,74 +528,84 @@ template <typename Traits, typename... Args>
                 else if (master_state == ll_state::per_stream)
                 {
 #ifdef ROGU_LOGLEVEL_PER_STREAM
-                    for (const auto& [s, bits] : logger_state::log_levels())
-                        if (s == stream)
-                        {
-                            include = ll_enabled(bits, Traits::level);
-                            break;
-                        }
-                    if (!include && logger_state::log_levels().empty())
-                        include = true;
+                    include = ll_enabled(entry.level_bits, Traits::level);
 #else
                     include = true;
 #endif
                 }
                 if (include)
-                    active_streams.push_back(stream);
+                    active_entries.push_back(&entry);
             }
-            if (active_streams.empty())
+            if (active_entries.empty())
                 return stream_wrapper{};
 
-#ifdef ROGU_SOURCE_LOCATION
-            std::string loc_str = std::format("{}:{}: ", fwl.loc.file_name(), fwl.loc.line());
-#else
-            std::string_view loc_str = "";
-#endif
+            int pop_nobreak = has_flag(flags, rogu::log_flags::no_break) ? 1 : 0;
+            std::string_view raw_msg = fwl.fmt;//.substr(0, fwl.fmt.size() - pop_nobreak);
 
-            int pop_nobreak = trailing_no_break_marker(fwl.fmt);
-            std::string_view msg = fwl.fmt.substr(0, fwl.fmt.size() - pop_nobreak);
+            std::string message;
+            if constexpr (sizeof...(args) == 0)
+                message = raw_msg;
+            else
+                message = std::vformat(raw_msg, std::make_format_args(args...));
+
+            log_event event
+            {
+                .level        = Traits::level,
+                .level_str    = prefix,
+                .level_colour = Traits::colour,
+                .message      = message,
+                .flags        = flags,
+#ifdef ROGU_TIMESTAMP
+                .timestamp    = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()),
+#endif
+#ifdef ROGU_SOURCE_LOCATION
+                .location     = fwl.loc,
+#endif
+            };
+
+            if (has_flag(flags, log_flags::msg_only))
+                event.level_str = "";
 
 #ifdef ROGU_ASYNC
             if (async_logger.running)
             {
-                std::string formatted;
-                if constexpr (sizeof...(args) == 0)
-                    formatted = std::format("{}{}{}{}",
-                        timestamp(),
-                        rogu::colorise(Traits::colour, prefix),
-                        loc_str,
-                        msg);
-                else
-                    formatted = std::format("{}{}{}{}",
-                        timestamp(),
-                        rogu::colorise(Traits::colour, prefix),
-                        loc_str,
-                        std::vformat(msg, std::make_format_args(args...)));
-
+                static thread_local std::vector<std::pair<std::ostream*, std::string>> async_outputs;
+                async_outputs.clear();
+                for (auto* entry : active_entries)
+                {
+                    rendered_event r = has_flag(flags, log_flags::msg_only)
+                        ? rendered_event{std::string(message), {}}
+                        : render(entry->format_str, event);
+                    std::string full = std::move(r.before_msg) + message + std::move(r.after_msg);
+                    async_outputs.push_back({entry->stream, std::move(full)});
+                }
                 std::lock_guard<std::mutex> async_lock(async_logger.queue_mutex);
-                async_logger.queue.push({std::move(formatted), active_streams, pop_nobreak == 1});
+                for (auto& [stream, text] : async_outputs)
+                    async_logger.queue.push({std::move(text), {stream}, pop_nobreak == 1});
                 async_logger.queue_cv.notify_one();
                 return stream_wrapper{};
             }
 #endif
 
-            std::string formatted;
-            if constexpr (sizeof...(args) == 0)
-                formatted = std::format("{}{}{}{}",
-                    timestamp(),
-                    rogu::colorise(Traits::colour, prefix),
-                    loc_str,
-                    msg);
-            else
-                formatted = std::format("{}{}{}{}",
-                    timestamp(),
-                    rogu::colorise(Traits::colour, prefix),
-                    loc_str,
-                    std::vformat(msg, std::make_format_args(args...)));
-
-            for (auto* stream : active_streams)
-                *stream << formatted;
-            return stream_wrapper{std::move(active_streams), pop_nobreak == 1};
+            static thread_local std::vector<std::ostream*> active_streams;
+            active_streams.clear();
+            std::string after_msg_str;
+            for (auto* entry : active_entries)
+            {
+                if (has_flag(flags, log_flags::msg_only))
+                {
+                    *entry->stream << message;
+                }
+                else
+                {
+                    rendered_event r = render(entry->format_str, event);
+                    *entry->stream << r.before_msg;
+                    if (r.msg_seen) *entry->stream << message;
+                    after_msg_str = std::move(r.after_msg);
+                }
+                active_streams.push_back(entry->stream);
+            }
+            return stream_wrapper{std::move(active_streams), std::move(after_msg_str), pop_nobreak == 1};
         }
     } // ns impl
 
@@ -485,46 +622,81 @@ template <typename Traits, typename... Args>
 // LOG LEVEL PRINTERS
 // These are what the macros resolve to:
 //============================================================================    
-    template<typename... Args>
+template<typename... Args>
     impl::stream_wrapper debug(impl::format_with_location fwl = {""}, Args&&... args)
     {
-        return impl::log<impl::log_traits<log_level::debug, col::grey>>("", fwl, std::forward<Args>(args)...);
+        return impl::log<impl::log_traits<log_level::debug, col::grey>>("debug", log_flags::none, fwl, std::forward<Args>(args)...);
+    }
+    template<typename... Args>
+    impl::stream_wrapper debug(log_flags flags, impl::format_with_location fwl = {""}, Args&&... args)
+    {
+        return impl::log<impl::log_traits<log_level::debug, col::grey>>("debug", flags, fwl, std::forward<Args>(args)...);
     }
 
     template<typename... Args>
     impl::stream_wrapper trace(impl::format_with_location fwl = {""}, Args&&... args)
     {
-        return impl::log<impl::log_traits<log_level::trace, col::light_blue>>("> ", fwl, std::forward<Args>(args)...);
+        return impl::log<impl::log_traits<log_level::trace, col::light_blue>>("trace", log_flags::none, fwl, std::forward<Args>(args)...);
+    }
+    template<typename... Args>
+    impl::stream_wrapper trace(log_flags flags, impl::format_with_location fwl = {""}, Args&&... args)
+    {
+        return impl::log<impl::log_traits<log_level::trace, col::light_blue>>("trace", flags, fwl, std::forward<Args>(args)...);
     }
 
     template<typename... Args>
     impl::stream_wrapper info(impl::format_with_location fwl = {""}, Args&&... args)
     {
-        return impl::log<impl::log_traits<log_level::info, col::light_blue>>("info: ", fwl, std::forward<Args>(args)...);
+        return impl::log<impl::log_traits<log_level::info, col::light_blue>>("info", log_flags::none, fwl, std::forward<Args>(args)...);
+    }
+    template<typename... Args>
+    impl::stream_wrapper info(log_flags flags, impl::format_with_location fwl = {""}, Args&&... args)
+    {
+        return impl::log<impl::log_traits<log_level::info, col::light_blue>>("info", flags, fwl, std::forward<Args>(args)...);
     }
 
-    template<typename... Args>
+template<typename... Args>
     impl::stream_wrapper warning(impl::format_with_location fwl = {""}, Args&&... args)
     {
-        return impl::log<impl::log_traits<log_level::warning, col::yellow>>("Warning: ", fwl, std::forward<Args>(args)...);
+        return impl::log<impl::log_traits<log_level::warning, col::yellow>>("warning", log_flags::none, fwl, std::forward<Args>(args)...);
+    }
+    template<typename... Args>
+    impl::stream_wrapper warning(log_flags flags, impl::format_with_location fwl = {""}, Args&&... args)
+    {
+        return impl::log<impl::log_traits<log_level::warning, col::yellow>>("warning", flags, fwl, std::forward<Args>(args)...);
     }
 
     template<typename... Args>
     impl::stream_wrapper error(impl::format_with_location fwl = {""}, Args&&... args)
     {
-        return impl::log<impl::log_traits<log_level::error, col::light_red>>("ERROR: ", fwl, std::forward<Args>(args)...);
+        return impl::log<impl::log_traits<log_level::error, col::light_red>>("error", log_flags::none, fwl, std::forward<Args>(args)...);
+    }
+    template<typename... Args>
+    impl::stream_wrapper error(log_flags flags, impl::format_with_location fwl = {""}, Args&&... args)
+    {
+        return impl::log<impl::log_traits<log_level::error, col::light_red>>("error", flags, fwl, std::forward<Args>(args)...);
     }
 
     template<typename... Args>
     impl::stream_wrapper critical(impl::format_with_location fwl = {""}, Args&&... args)
     {
-        return impl::log<impl::log_traits<log_level::critical, col::light_red>>("CRITICAL: ", fwl, std::forward<Args>(args)...);
+        return impl::log<impl::log_traits<log_level::critical, col::light_red>>("critical", log_flags::none, fwl, std::forward<Args>(args)...);
+    }
+    template<typename... Args>
+    impl::stream_wrapper critical(log_flags flags, impl::format_with_location fwl = {""}, Args&&... args)
+    {
+        return impl::log<impl::log_traits<log_level::critical, col::light_red>>("critical", flags, fwl, std::forward<Args>(args)...);
     }
 
     template<typename... Args>
     impl::stream_wrapper record(impl::format_with_location fwl = {""}, Args&&... args)
     {
-        return impl::log<impl::log_traits<log_level::record, col::grey>>("", fwl, std::forward<Args>(args)...);
+        return impl::log<impl::log_traits<log_level::record, col::grey>>("", log_flags::none, fwl, std::forward<Args>(args)...);
+    }
+    template<typename... Args>
+    impl::stream_wrapper record(log_flags flags, impl::format_with_location fwl = {""}, Args&&... args)
+    {
+        return impl::log<impl::log_traits<log_level::record, col::grey>>("", flags, fwl, std::forward<Args>(args)...);
     }
 
 #ifdef ROGU_ASYNC
@@ -567,15 +739,27 @@ template <typename Traits, typename... Args>
     }
 #endif
 
-    inline void add_output(std::ostream* stream)
+    inline void add_output(std::ostream* stream, std::string format_str = impl::default_format_str)
     {
         if (!stream) return;
         std::lock_guard<std::mutex> lock(impl::output_mutex);
         impl::initialise_outputs_locked();
-        impl::get_outputs().push_back(stream);
-#ifdef ROGU_LOGLEVEL_PER_STREAM    
-        impl::logger_state::log_levels().emplace_back(stream, 0b1111111);
+        impl::logger_state::entries().push_back({stream,
+#ifdef ROGU_LOGLEVEL_PER_STREAM
+            0b1111111,
 #endif
+            std::move(format_str)});
+    }
+
+    inline void set_formatter(std::ostream* stream, std::string format_str)
+    {
+        std::lock_guard<std::mutex> lock(impl::output_mutex);
+        for (auto& entry : impl::logger_state::entries())
+            if (entry.stream == stream)
+            {
+                entry.format_str = std::move(format_str);
+                return;
+            }
     }
 
     inline void disable_log_level(log_level ll)
@@ -596,14 +780,16 @@ template <typename Traits, typename... Args>
 
     inline void disable_log_level_for_stream(std::ostream* s, log_level ll)
     {
-        for (auto& [stream, bits] : impl::logger_state::log_levels())
-            if (stream == s) impl::clear_bits(bits, ll);
+        std::lock_guard<std::mutex> lock(impl::output_mutex);
+        for (auto& entry : impl::logger_state::entries())
+            if (entry.stream == s) impl::clear_bits(entry.level_bits, ll);
     }
 
     inline void enable_log_level_for_stream(std::ostream* s, log_level ll)
     {
-        for (auto& [stream, bits] : impl::logger_state::log_levels())
-            if (stream == s) impl::set_bits(bits, ll);
+        std::lock_guard<std::mutex> lock(impl::output_mutex);
+        for (auto& entry : impl::logger_state::entries())
+            if (entry.stream == s) impl::set_bits(entry.level_bits, ll);
     }
 #endif    
 }
