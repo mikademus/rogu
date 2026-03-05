@@ -42,18 +42,25 @@
 #define ROGU_ANSI       /* Enable ANSI colour output */
 #define ROGU_ASYNC      /* Enable asynchronous logging */
 #define ROGU_LOGLEVEL_PER_STREAM
+#define ROGU_SOURCE_LOCATION /* Enable trace source log location */
 
 #include <atomic>
 #include <format>
 #include <mutex>
 #include <ostream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #ifdef ROGU_ASYNC
 #include <queue>
 #include <thread>
 #include <condition_variable>
+#endif
+
+#ifdef ROGU_SOURCE_LOCATION
+#include <concepts>
+#include <source_location>
 #endif
 
 #define LOG_REC rogu::record
@@ -239,6 +246,28 @@ namespace rogu
         inline async_state async_logger;
 #endif
 
+#ifdef ROGU_SOURCE_LOCATION
+        struct format_with_location
+        {
+            std::string_view fmt;
+            std::source_location loc;
+
+            template<typename T>
+                requires std::convertible_to<T, std::string_view>
+            format_with_location(T&& f, std::source_location l = std::source_location::current())
+                : fmt(std::forward<T>(f)), loc(std::move(l)) {}
+        };
+#else
+        struct format_with_location
+        {
+            std::string_view fmt;
+
+            template<typename T>
+                requires std::convertible_to<T, std::string_view>
+            format_with_location(T&& f) : fmt(std::forward<T>(f)) {}
+        };
+#endif
+
         struct stream_wrapper
         {
             std::vector<std::ostream*> streams;
@@ -333,7 +362,7 @@ namespace rogu
         };
 
         template <typename Traits, typename... Args>
-        stream_wrapper log(std::string_view prefix, std::string_view s = "", Args&&... args)
+        stream_wrapper log(std::string_view prefix, format_with_location fwl = {""}, Args&&... args)
         {
             std::lock_guard<std::mutex> lock(output_mutex);
             initialise_outputs_locked();
@@ -374,40 +403,44 @@ namespace rogu
             if (active_streams.empty())
                 return stream_wrapper{};
 
+#ifdef ROGU_SOURCE_LOCATION
+            std::string loc_str = std::format("{}:{}: ", fwl.loc.file_name(), fwl.loc.line());
+#else
+            std::string_view loc_str = "";
+#endif
+
+            int pop_nobreak = trailing_no_break_marker(fwl.fmt);
+            std::string_view msg = fwl.fmt.substr(0, fwl.fmt.size() - pop_nobreak);
+
 #ifdef ROGU_ASYNC
             if (async_logger.running)
             {
-                int pop_nobreak = trailing_no_break_marker(s);
                 std::string formatted;
                 if constexpr (sizeof...(args) == 0)
-                    formatted = std::format("{}{}", rogu::colorise(Traits::colour, prefix),
-                                            s.substr(0, s.size() - pop_nobreak));
+                    formatted = std::format("{}{}{}", rogu::colorise(Traits::colour, prefix), loc_str, msg);
                 else
-                    formatted = std::format("{}{}", rogu::colorise(Traits::colour, prefix),
-                                            std::vformat(s.substr(0, s.size() - pop_nobreak), 
-                                                         std::make_format_args(args...)));
-                
-                std::lock_guard<std::mutex> lock(async_logger.queue_mutex);
+                    formatted = std::format("{}{}{}", rogu::colorise(Traits::colour, prefix), loc_str,
+                                            std::vformat(msg, std::make_format_args(args...)));
+
+                std::lock_guard<std::mutex> async_lock(async_logger.queue_mutex);
                 async_logger.queue.push({std::move(formatted), active_streams, pop_nobreak == 1});
                 async_logger.queue_cv.notify_one();
                 return stream_wrapper{};
             }
 #endif
 
-            int pop_nobreak = trailing_no_break_marker(s);
             std::string formatted;
             if constexpr (sizeof...(args) == 0)
-                formatted = std::format("{}{}", rogu::colorise(Traits::colour, prefix),
-                                        s.substr(0, s.size() - pop_nobreak));
+                formatted = std::format("{}{}{}", rogu::colorise(Traits::colour, prefix), loc_str, msg);
             else
-                formatted = std::format("{}{}", rogu::colorise(Traits::colour, prefix),
-                                        std::vformat(s.substr(0, s.size() - pop_nobreak), 
-                                                     std::make_format_args(args...)));
+                formatted = std::format("{}{}{}", rogu::colorise(Traits::colour, prefix), loc_str,
+                                        std::vformat(msg, std::make_format_args(args...)));
+
             for (auto* stream : active_streams)
                 *stream << formatted;
             return stream_wrapper{std::move(active_streams), pop_nobreak == 1};
         }
-    }
+    } // ns impl
 
     inline std::string colorise(col fg, std::string_view str)
     {
@@ -418,13 +451,51 @@ namespace rogu
 #endif
     }
 
-    inline auto debug    = [](std::string_view s = "", auto&&... args) { return impl::log<impl::log_traits<log_level::debug,    col::grey>>("", s, std::forward<decltype(args)>(args)...); };
-    inline auto trace    = [](std::string_view s = "", auto&&... args) { return impl::log<impl::log_traits<log_level::trace,    col::light_blue>>("> ", s, std::forward<decltype(args)>(args)...); };
-    inline auto info     = [](std::string_view s = "", auto&&... args) { return impl::log<impl::log_traits<log_level::info,     col::light_blue>>("info: ", s, std::forward<decltype(args)>(args)...); };
-    inline auto warning  = [](std::string_view s = "", auto&&... args) { return impl::log<impl::log_traits<log_level::warning,  col::yellow>>("Warning: ", s, std::forward<decltype(args)>(args)...); };
-    inline auto error    = [](std::string_view s = "", auto&&... args) { return impl::log<impl::log_traits<log_level::error,    col::light_red>>("ERROR: ", s, std::forward<decltype(args)>(args)...); };
-    inline auto critical = [](std::string_view s = "", auto&&... args) { return impl::log<impl::log_traits<log_level::critical, col::light_red>>("CRITICAL: ", s, std::forward<decltype(args)>(args)...); };
-    inline auto record   = [](std::string_view s = "", auto&&... args) { return impl::log<impl::log_traits<log_level::record,   col::grey>>("", s, std::forward<decltype(args)>(args)...); };
+//============================================================================    
+// LOG LEVEL PRINTERS
+// These are what the macros resolve to:
+//============================================================================    
+    template<typename... Args>
+    impl::stream_wrapper debug(impl::format_with_location fwl = {""}, Args&&... args)
+    {
+        return impl::log<impl::log_traits<log_level::debug, col::grey>>("", fwl, std::forward<Args>(args)...);
+    }
+
+    template<typename... Args>
+    impl::stream_wrapper trace(impl::format_with_location fwl = {""}, Args&&... args)
+    {
+        return impl::log<impl::log_traits<log_level::trace, col::light_blue>>("> ", fwl, std::forward<Args>(args)...);
+    }
+
+    template<typename... Args>
+    impl::stream_wrapper info(impl::format_with_location fwl = {""}, Args&&... args)
+    {
+        return impl::log<impl::log_traits<log_level::info, col::light_blue>>("info: ", fwl, std::forward<Args>(args)...);
+    }
+
+    template<typename... Args>
+    impl::stream_wrapper warning(impl::format_with_location fwl = {""}, Args&&... args)
+    {
+        return impl::log<impl::log_traits<log_level::warning, col::yellow>>("Warning: ", fwl, std::forward<Args>(args)...);
+    }
+
+    template<typename... Args>
+    impl::stream_wrapper error(impl::format_with_location fwl = {""}, Args&&... args)
+    {
+        return impl::log<impl::log_traits<log_level::error, col::light_red>>("ERROR: ", fwl, std::forward<Args>(args)...);
+    }
+
+    template<typename... Args>
+    impl::stream_wrapper critical(impl::format_with_location fwl = {""}, Args&&... args)
+    {
+        return impl::log<impl::log_traits<log_level::critical, col::light_red>>("CRITICAL: ", fwl, std::forward<Args>(args)...);
+    }
+
+    template<typename... Args>
+    impl::stream_wrapper record(impl::format_with_location fwl = {""}, Args&&... args)
+    {
+        return impl::log<impl::log_traits<log_level::record, col::grey>>("", fwl, std::forward<Args>(args)...);
+    }
 
 #ifdef ROGU_ASYNC
     inline void start_async()
