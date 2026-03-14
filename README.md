@@ -230,8 +230,61 @@ rogu::info("status: {}", rogu::colorise(rogu::col::light_green, "all clear"));
 ```
 Colours applied via `rogu::colorise` are treated as message data and are not affected by formatter settings. Available colours correspond to the EGA console palette: black, red, green, yellow, blue, magenta, cyan, grey, dark_grey, light_red, light_green, light_yellow, light_blue, light_magenta, light_cyan, white.
 
+### Example
+
+The following example demonstrates a common production setup: human-readable, colourised output to the console, and a structured, high-fidelity log to a file.
+
+```cpp
+#include <fstream>
+#include <iostream>
+
+#define ROGU_ANSI
+#define ROGU_PER_STREAM
+#define ROGU_TIMESTAMP
+#define ROGU_SOURCE_LOCATION
+#include "rogu.hpp"
+
+int main()
+{
+    // 1. Setup a file stream for persistent logging
+    std::ofstream log_file("system.log", std::ios::app);
+
+    // 2. Register streams
+    rogu::add_output(&std::cout, "[{ll}] {msg}");
+    rogu::add_output(&log_file, "{time} | {ll} | {trace} | {msg}");
+
+    // 3. Configure per-stream granularity
+    // We want 'debug' logs in the file, but only 'info' and above on the console.
+    rogu::delegate_log_level(rogu::log_level::debug);
+    rogu::enable_log_level_for_stream(&log_file, rogu::log_level::debug);
+    rogu::disable_log_level_for_stream(&std::cout, rogu::log_level::debug);
+
+    // 4. Logging in action
+    rogu::info("system initialisation started");
+
+    int port = 8080;
+    rogu::debug("binding to port {}", port); // Only appears in system.log
+
+    if (port == 8080)
+    {
+        // Hybrid syntax: format string + stream continuation
+        rogu::warning("port {} is a common target", port) << " - consider changing";
+    }
+
+    // Manual colourisation for specific message components
+    rogu::info("service status: {}", rogu::colorise(rogu::col::light_green, "online"));
+
+    // 5. One-off overrides using flags
+    // This ignores all formatting/level logic to print a raw status line
+    rogu::record(rogu::msg_only, "--- session end ---");
+
+    return 0;
+}
+```
+
 ### Roadmap
 * Compile-time level stripping — a `#define ROGU_MIN_LEVEL` that eliminates log calls below a threshold entirely at compile time, producing zero overhead in release builds.
+* Optional flexible API for structured output.
 
 ### Licence
 Licenced as-is under the MIT licence.
