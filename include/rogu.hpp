@@ -162,6 +162,8 @@
 #include <chrono>
 #endif
 
+// Convenience macros:
+
 #define LOG_REC rogu::record
 #define LOG_CRIT rogu::critical
 #define LOG_ERR rogu::error
@@ -169,6 +171,20 @@
 #define LOG_INFO rogu::info
 #define LOG_DEBUG rogu::debug
 #define LOG_TRACE rogu::trace
+
+#define WRAP__(x) do { x } while (0)
+
+// Helpers for all streams toggles
+#define LOG_ENABLE_LL(loglevel) WRAP__( rogu::enable_log_level((loglevel)); )
+#define LOG_DISABLE_LL(loglevel) WRAP__( rogu::disable_log_level((loglevel)); )
+#define LOG_ENABLE_FIELD(field) WRAP__( rogu::enable_field((field)); )
+#define LOG_DISABLE_FIELD(field) WRAP__( rogu::disable_field((field)); )
+
+// Helpers for per-stream toggles
+#define LOG_ENABLE_LL_FOR(stream, loglevel) WRAP__( rogu::delegate_log_level((loglevel)); rogu::enable_log_level_for_stream((stream), (loglevel)); )
+#define LOG_DISABLE_LL_FOR(stream, loglevel) WRAP__( rogu::delegate_log_level((loglevel)); rogu::disable_log_level_for_stream((stream), (loglevel)); )
+#define LOG_ENABLE_FIELD_FOR(stream, field) WRAP__( rogu::delegate_field((field)); rogu::enable_field_for_stream((stream), (field)); )
+#define LOG_DISABLE_FIELD_FOR(stream, field) WRAP__( rogu::delegate_field((field)); rogu::disable_field_for_stream((stream), (field)); )
 
 namespace rogu
 {
