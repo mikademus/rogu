@@ -1,8 +1,14 @@
 //============================================================================
 // rogu: The Kiroku Logger
 // version: 0.6.0
+// author: Mikael Ueno A
+// licence: MIT 2025
 //============================================================================
-//
+
+#ifndef KIROKU_INCLUDE
+#define KIROKU_INCLUDE
+
+//-----------------------------------------------------------------
 // INVOCATION
 //------------
 // Function syntax:
@@ -116,28 +122,21 @@
 //      black  red  green  yellow  blue  magenta  cyan  grey
 //      dark_grey  light_red  light_green  light_yellow  light_blue
 //      light_magenta  light_cyan  white
-//
-//
-// COMPILE-TIME CONTROLS
-//-----------------------
-// Define before including rogu.hpp. The header has all enabled by default —
-// comment out what you do not need:
-//
-//      #define ROGU_ANSI                // Enable ANSI colour output
-//      #define ROGU_ASYNC               // Enable asynchronous logging
-//      #define ROGU_PER_STREAM          // Enable per-stream level control
-//      #define ROGU_SOURCE_LOCATION     // Enable {trace} source location token
-//      #define ROGU_TIMESTAMP           // Enable {time} UTC timestamp token
-//
-#ifndef KIROKU_INCLUDE
-#define KIROKU_INCLUDE
+//-----------------------------------------------------------------
 
-// Uncomment to enable feature:
-#define ROGU_ANSI            /* Enable ANSI colour output */
-#define ROGU_ASYNC           /* Enable asynchronous logging */
-#define ROGU_PER_STREAM      /* Enable per-stream settings */
-#define ROGU_SOURCE_LOCATION /* Enable trace source log location */
-#define ROGU_TIMESTAMP       /* Enable time/datestamps */
+
+//-----------------------------------------------------------------
+// ENABLE FEATURES
+// ---------------
+// Uncomment or define before including 
+// the rogu header to enable features:
+//-----------------------------------------------------------------
+// #define ROGU_ANSI                // Enable ANSI colour output
+// #define ROGU_ASYNC               // Enable asynchronous logging
+// #define ROGU_PER_STREAM          // Enable per-stream level control
+// #define ROGU_SOURCE_LOCATION     // Enable {trace} source location token
+// #define ROGU_TIMESTAMP           // Enable {time} UTC timestamp token
+//-----------------------------------------------------------------
 
 #include <atomic>
 #include <format>
@@ -162,8 +161,12 @@
 #include <chrono>
 #endif
 
+//-----------------------------------------------------------------
 // Convenience macros:
+//-----------------------------------------------------------------
 
+// Log shorthands
+// --------------
 #define LOG_REC rogu::record
 #define LOG_CRIT rogu::critical
 #define LOG_ERR rogu::error
@@ -175,16 +178,19 @@
 #define WRAP__(x) do { x } while (0)
 
 // Helpers for all streams toggles
+// -------------------------------
 #define LOG_ENABLE_LL(loglevel) WRAP__( rogu::enable_log_level((loglevel)); )
 #define LOG_DISABLE_LL(loglevel) WRAP__( rogu::disable_log_level((loglevel)); )
 #define LOG_ENABLE_FIELD(field) WRAP__( rogu::enable_field((field)); )
 #define LOG_DISABLE_FIELD(field) WRAP__( rogu::disable_field((field)); )
 
 // Helpers for per-stream toggles
+// ------------------------------
 #define LOG_ENABLE_LL_FOR(stream, loglevel) WRAP__( rogu::delegate_log_level((loglevel)); rogu::enable_log_level_for_stream((stream), (loglevel)); )
 #define LOG_DISABLE_LL_FOR(stream, loglevel) WRAP__( rogu::delegate_log_level((loglevel)); rogu::disable_log_level_for_stream((stream), (loglevel)); )
 #define LOG_ENABLE_FIELD_FOR(stream, field) WRAP__( rogu::delegate_field((field)); rogu::enable_field_for_stream((stream), (field)); )
 #define LOG_DISABLE_FIELD_FOR(stream, field) WRAP__( rogu::delegate_field((field)); rogu::disable_field_for_stream((stream), (field)); )
+
 
 namespace rogu
 {
@@ -252,25 +258,19 @@ namespace rogu
 
     enum col
     {
-        black           = 0,
-        red             = 1,
-        green           = 2,
-        yellow          = 3,
-        blue            = 4,
-        magenta         = 5,
-        cyan            = 6,
-        grey            = 7,
-        dark_grey       = 60,
-        light_red       = 61,
-        light_green     = 62,
-        light_yellow    = 63,
-        light_blue      = 64,
-        light_magenta   = 65,
-        light_cyan      = 66,
-        white           = 67,
+    //  Base hues               Light hues
+    //  ---------               ----------
+        black           = 0,    dark_grey       = 60,
+        red             = 1,    light_red       = 61,
+        green           = 2,    light_green     = 62,
+        yellow          = 3,    light_yellow    = 63,
+        blue            = 4,    light_blue      = 64,
+        magenta         = 5,    light_magenta   = 65,
+        cyan            = 6,    light_cyan      = 66,
+        grey            = 7,    white           = 67,
     };
 
-    inline std::string colourise(col fg, std::string_view str); // forward declaration
+    inline std::string colourise(col fg, std::string_view str); 
 
 #ifdef ROGU_ANSI
     namespace ansi
