@@ -2,6 +2,44 @@
 
 *Rogu* is the short form for **The Kiroku Logger** — *kiroku* (記録) is "record" in Japanese. A lightweight, self-contained, single-header C++ logger with no unnecessary dependencies and no integration overhead.
 
+## Overview
+
+Most logging frameworks are integration projects. Rogu is not. It is a single header file you drop into your project and include. There is nothing to build, no dependencies to satisfy, no configuration files to write.
+
+Despite its minimal footprint, Rogu covers the features that matter in practice: multiple simultaneous output streams, per-stream log level and field visibility control, per-stream output formatting with configurable field order, optional timestamps, optional source location, optional asynchronous logging, and optional ANSI colour output. It supports both `std::format`-style and `std::ostream`-style call syntax, so it fits naturally into any existing codebase.
+
+Rogu requires C++20.
+
+## Comparison of C++ Logging Frameworks
+
+The following table illustrates how Rogu compares to established logging libraries. While many frameworks offer exhaustive feature sets, Rogu prioritises a minimal footprint and zero-overhead integration.
+
+| Feature | Rogu | spdlog | Boost.Log | glog |
+| :--- | :--- | :--- | :--- | :--- |
+| **Integration** | **Single Header** | Header-only or Lib | Library (Complex) | Library |
+| **Dependencies** | **None (C++20)** | Optional (fmt) | Heavy (Boost) | Abseil / Google |
+| **Configuration** | **Compile-time Macros** | Runtime Registry | Backend/Frontend | Gflags / Init |
+| **Formatting** | **Per-Stream (Tokens)** | Global/Per-Logger | Complex Facets | Minimal / Fixed |
+| **Level Control** | **Per-Stream** | Limited per Sink | Sinks (Complex) | Global |
+| **Zero-Cost Logs** | **Min Level Stripping** | Macro-based only | Complex Filtering | No |
+| **Binary Impact** | **Minimal** | Moderate | High | Moderate |
+
+---
+
+### Technical Qualifications and Design Notes
+
+#### 1. Binary Footprint and Feature Opt-ins
+In resource-constrained environments or minimal system deployments, the size of the executable is a critical metric. Rogu employs a "Pay-only-for-what-you-use" model via compile-time `#define` macros (e.g., `ROGU_ANSI`, `ROGU_TIMESTAMP`).
+* **The Benefit:** By disabling unused features at the pre-processor level, the client strips the associated logic and string constants from the binary. Unlike linking against pre-compiled libraries that include every feature by default, Rogu allows the binary to be as lean as the specific deployment requires.
+
+#### 2. Per-Stream "Observability" and Formatting
+Modern systems often require different data representations for different consumers. A terminal might need human-readable, colourised output, while a log-aggregation service requires machine-readable data with full source metadata.
+* **The Benefit:** Rogu allows each registered stream to maintain its own format string and log-level threshold. This eliminates the "double-logging" performance hit often found in other frameworks, as Rogu processes the log event once and distributes the uniquely rendered output to multiple sinks efficiently.
+
+#### 3. Modern C++ Efficiency and Call-site Latency
+Performance in C++20 is increasingly focused on reducing unnecessary memory allocations. Older `std::ostream`-based frameworks often involve multiple temporary string allocations and heavy template metaprogramming.
+* **The Benefit:** Rogu leverages modern string-handling paths to minimise the overhead on the hot path. This reduces call-site latency, making the logger suitable for high-frequency loops where excessive logging overhead could introduce timing variations or "observer effect" bugs.
+
 ## Why Rogu Exists
 Logging should be the simplest thing in a project. It rarely is.
 
@@ -16,13 +54,6 @@ When basic `std::cout` and `std::cerr` output stopped being sufficient — which
 None of them offered what seemed like a reasonable baseline: a single header you include, a stream you register, and a set of log calls you make. No boilerplate, no build integration, no opinions about your project structure.
 
 So The Kiroku Logger (Rogu) was written instead. Its goals are straightforward: a single #include, modern C++ syntax, minimal resource footprint, and solid coverage of the cases that actually come up — multiple output streams, per-stream log level control, and per-stream output formatting.
-
-## Overview
-Most logging frameworks are integration projects. Rogu is not. It is a single header file you drop into your project and include. There is nothing to build, no dependencies to satisfy, no configuration files to write.
-
-Despite its minimal footprint, Rogu covers the features that matter in practice: multiple simultaneous output streams, per-stream log level and field visibility control, per-stream output formatting with configurable field order, optional timestamps, optional source location, optional asynchronous logging, and optional ANSI colour output. It supports both `std::format`-style and `std::ostream`-style call syntax, so it fits naturally into any existing codebase.
-
-Rogu requires C++20.
 
 ## Installation
 Copy `rogu.hpp` into your project and include it:
