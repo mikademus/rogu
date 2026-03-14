@@ -332,8 +332,8 @@ int main()
 Note that the `LOG_{EN,DIS}ABLE` macros incur a redundancy by always invoking the the delegate functions, which can be avoided if using the functions directly for a theoretical gain. 
 
 ### Roadmap
-* Compile-time level stripping — a `#define ROGU_MIN_LEVEL` that eliminates log calls below a threshold entirely at compile time, producing zero overhead in release builds.
-* Optional flexible API for structured output.
+* **Compile-time level stripping** — a `#define ROGU_MIN_LEVEL` that eliminates log calls below a threshold entirely at compile time, producing zero overhead in release builds.
+* **Structured output** — Optional flexible API for structured output. 
 
 ### Licence
 Licenced as-is under the MIT licence.

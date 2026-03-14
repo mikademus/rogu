@@ -110,7 +110,7 @@
 //--------------------
 // Requires ROGU_ANSI. Each log level has an assigned colour. Strings can
 // also be colourised directly:
-//      rogu::info("status: {}", rogu::colorise(rogu::col::light_green, "ok"));
+//      rogu::info("status: {}", rogu::colourise(rogu::col::light_green, "ok"));
 //
 // Available colours (EGA palette):
 //      black  red  green  yellow  blue  magenta  cyan  grey
@@ -270,7 +270,7 @@ namespace rogu
         white           = 67,
     };
 
-    inline std::string colorise(col fg, std::string_view str); // forward declaration
+    inline std::string colourise(col fg, std::string_view str); // forward declaration
 
 #ifdef ROGU_ANSI
     namespace ansi
@@ -421,7 +421,7 @@ namespace rogu
                         if (e.active_fields & (1 << (int) rogu::field::ll))
                         {
 #ifdef ROGU_ANSI
-                            *out += rogu::colorise(e.level_colour, e.level_str);
+                            *out += rogu::colourise(e.level_colour, e.level_str);
 #else
                             *out += e.level_str;
 #endif
@@ -818,7 +818,7 @@ namespace rogu
         }
     } // ns impl
 
-    inline std::string colorise(col fg, std::string_view str)
+    inline std::string colourise(col fg, std::string_view str)
     {
 #ifdef ROGU_ANSI
         return std::format("{}{}{}", ansi::colour_code(impl::to_fg(fg)), str, ansi::reset_colours_code);
