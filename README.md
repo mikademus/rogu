@@ -281,6 +281,55 @@ int main()
     return 0;
 }
 ```
+Alternative example using the convenience macros:
+```cpp
+#include <fstream>
+#include <iostream>
+
+#define ROGU_ANSI
+#define ROGU_PER_STREAM
+#define ROGU_TIMESTAMP
+#define ROGU_SOURCE_LOCATION
+#include "rogu.hpp"
+
+int main()
+{
+    // 1. Setup a file stream for persistent logging
+    std::ofstream log_file("system.log", std::ios::app);
+
+    // 2. Register streams with distinct formats
+    rogu::add_output(&std::cout, "[{ll}] {msg}");
+    rogu::add_output(&log_file, "{time} | {ll} | {trace} | {msg}");
+
+    // 3. Configure per-stream granularity using shorthand macros
+    // We want 'debug' logs in the file, but only 'info' and above on the console.
+    LOG_ENABLE_LL_FOR(&log_file, rogu::log_level::debug);
+    LOG_DISABLE_LL_FOR(&std::cout, rogu::log_level::debug);
+
+    // 4. Logging in action
+    LOG_INFO("system initialisation started");
+
+    int port = 8080;
+    LOG_DEBUG("binding to port {}", port); // Only appears in system.log
+
+    if (port == 8080)
+    {
+        // Hybrid syntax: format string + stream continuation
+        LOG_WARN("port {} is a common target", port) << " - consider changing";
+    }
+
+    // Manual colourisation for specific message components
+    LOG_INFO("service status: {}", rogu::colorise(rogu::col::light_green, "online"));
+
+    // 5. Global field control via macros
+    // Temporarily disable timestamps globally for a clean console exit
+    LOG_DISABLE_FIELD(rogu::field::time);
+    LOG_REC(rogu::msg_only, "--- session end ---");
+
+    return 0;
+}
+```
+Note that the `LOG_{EN,DIS}ABLE` macros incur a redundancy by always invoking the the delegate functions, which can be avoided if using the functions directly for a theoretical gain. 
 
 ### Roadmap
 * Compile-time level stripping — a `#define ROGU_MIN_LEVEL` that eliminates log calls below a threshold entirely at compile time, producing zero overhead in release builds.
